@@ -10,21 +10,20 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -pthread")
 
 # 设置STM库路径
 set(STM_DIR "${CMAKE_SOURCE_DIR}/../../stm" CACHE PATH "Path to STM directory")
-set(STM_IMPL "tl2" CACHE STRING "STM implementation to use (tl2, norec, swissTM, etc.)")
-set(STM_INSTALL_DIR "${STM_DIR}/${STM_IMPL}/build/stm" CACHE PATH "STM installation directory")
+
+# 添加STM包含路径
+include_directories(
+    ${CMAKE_SOURCE_DIR}/backends/${STM_IMPL}
+    ${STM_DIR}/${STM_IMPL}/include
+)
+
+# 添加STM库路径
+link_directories(
+    ${STM_DIR}/${STM_IMPL}/lib
+)
 
 # 添加STM定义
 add_definitions(-DSTM)
-
-# 包含目录
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/common
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib
-    ${STM_INSTALL_DIR}/include
-)
-
-# 链接目录
-link_directories(${STM_INSTALL_DIR}/lib)
 
 # 添加子目录
 add_subdirectory(bayes)

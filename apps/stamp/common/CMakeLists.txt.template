@@ -1,17 +1,24 @@
+# 添加 thread.c 
+set(SOURCES ${SOURCES} ${CMAKE_SOURCE_DIR}/backends/${STM_IMPL}/thread.c)
+
 # 创建可执行文件
 add_executable(${BENCHMARK_NAME} ${SOURCES})
 
-# 链接STM库
-target_link_libraries(${BENCHMARK_NAME} ${STM_IMPL} m)
+# 添加编译定义
+if(DEFINED DEFINITIONS)
+    target_compile_definitions(${BENCHMARK_NAME} PRIVATE ${DEFINITIONS})
+endif()
 
 # 设置包含目录
 target_include_directories(${BENCHMARK_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/common
     ${CMAKE_SOURCE_DIR}/lib
-    ${STM_INSTALL_DIR}/include
+    ${CMAKE_SOURCE_DIR}/backends/${STM_IMPL}
+    ${STM_DIR}/${STM_IMPL}/include
 )
 
-# 添加编译定义
-if(DEFINED DEFINITIONS)
-    target_compile_definitions(${BENCHMARK_NAME} PRIVATE ${DEFINITIONS})
-endif() 
+# 链接STM库
+target_link_libraries(${BENCHMARK_NAME} 
+    ${STM_DIR}/${STM_IMPL}/lib/libstm.a
+    m
+)

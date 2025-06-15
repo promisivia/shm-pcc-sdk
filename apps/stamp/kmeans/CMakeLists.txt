@@ -6,7 +6,6 @@ set(SOURCES
     normal.c
     ${CMAKE_SOURCE_DIR}/lib/mt19937ar.c
     ${CMAKE_SOURCE_DIR}/lib/random.c
-    ${CMAKE_SOURCE_DIR}/lib/thread.c
 )
 
 # 设置编译定义

@@ -10,7 +10,6 @@ set(SOURCES
     ${CMAKE_SOURCE_DIR}/lib/pair.c
     ${CMAKE_SOURCE_DIR}/lib/queue.c
     ${CMAKE_SOURCE_DIR}/lib/random.c
-    ${CMAKE_SOURCE_DIR}/lib/thread.c
     ${CMAKE_SOURCE_DIR}/lib/vector.c
 )
 

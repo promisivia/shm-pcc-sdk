@@ -20,36 +20,35 @@ endif()
 # 源文件
 set(TL2_SOURCES
     tl2.c
-    thread.c
     tmalloc.c
 )
 
-# 头文件
-set(TL2_HEADERS
-    tl2.h
-    thread.h
-    tmalloc.h
-    util.h
-    common.h
-    platform.h
-    stm.h
-    ${PLATFORM_SOURCE}
-)
-
-# 创建共享库
-add_library(tl2 SHARED ${TL2_SOURCES} ${TL2_HEADERS})
+# 创建静态库
+add_library(stm STATIC ${TL2_SOURCES})
 
 # 设置包含目录
-target_include_directories(tl2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(stm
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
 
-# 设置安装路径
-set(STM_INSTALL_DIR "${CMAKE_BINARY_DIR}/install" CACHE PATH "STM installation directory")
+# 设置输出目录
+set_target_properties(stm PROPERTIES
+    OUTPUT_NAME "stm"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lib"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lib"
+)
 
 # 安装规则
-install(TARGETS tl2
-    LIBRARY DESTINATION ${STM_INSTALL_DIR}/lib
-    ARCHIVE DESTINATION ${STM_INSTALL_DIR}/lib
+install(TARGETS stm
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
 )
 
 # 安装头文件
-install(FILES stm.h tl2.h thread.h tmalloc.h util.h common.h platform.h platform_x86.h platform_sparc.h DESTINATION ${STM_INSTALL_DIR}/include)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    DESTINATION include
+    FILES_MATCHING PATTERN "*.h"
+)
