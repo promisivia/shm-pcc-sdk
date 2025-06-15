@@ -1,0 +1,120 @@
+# Specify the minimum version of CMake
+cmake_minimum_required(VERSION 3.10)
+
+# Set the project name
+project(YCSBC)
+
+# Include the configuration file
+include(cmake.config)
+
+# Specify the C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+set(ROOT_DIR "../../")
+set(DS_DIR "${ROOT_DIR}/ds")
+set(LIB_DIR "${ROOT_DIR}/lib")
+
+find_package(Libssh REQUIRED)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -mcx16 -march=native -msse4.1")
+#  -fsanitize=address -fno-omit-frame-pointer
+
+set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Release)
+
+# Include directories
+include_directories(include)
+
+# Specify the source files
+file(GLOB SUBSRCS "core/*.cc" "ycsbc.cc" "db/db_factory.cc" "db/thread_pool.cc" "follower/*.cc")
+
+set(public_link_libs "")
+set(interface_link_libs "")
+
+macro(add_db db_file db_dir lib_name program_macro link_type)
+    if(${program_macro} STREQUAL "ON")
+        list(APPEND SUBSRCS db/${db_file})
+        if(${link_type} STREQUAL "PUBLIC")
+            list(APPEND public_link_libs ${lib_name})
+        elseif(${link_type} STREQUAL "INTERFACE")
+            list(APPEND interface_link_libs ${lib_name})
+        endif()
+        
+        # Check if the directory exists and has a CMakeLists.txt
+        if(EXISTS "${DS_DIR}/${db_dir}/CMakeLists.txt")
+            add_subdirectory(${DS_DIR}/${db_dir} ${CMAKE_BINARY_DIR}/${db_dir})
+        else()
+            # For header-only libraries, just add the include directory
+            include_directories(${DS_DIR}/${db_dir})
+            # Remove from link libraries since it's header-only
+            list(REMOVE_ITEM public_link_libs ${lib_name})
+            list(REMOVE_ITEM interface_link_libs ${lib_name})
+        endif()
+        
+        add_compile_definitions(${program_macro})
+    endif()
+endmacro()
+
+add_subdirectory(${LIB_DIR} ${CMAKE_BINARY_DIR}/lib)
+list(APPEND public_link_libs shm-lib)
+
+# Add databases based on configuration
+add_db("bwtree_db.cc" "BwTree" "bwtree" ENABLE_BWTREE_DB "PUBLIC")
+add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" ENABLE_CLEVEL_HASH_DB "INTERFACE")
+add_db("clht_db.cc" "CLHT" "clht" ENABLE_CLHT_DB "PUBLIC")
+add_db("hot_db.cc" "HOT" "hot" ENABLE_HOT_DB "INTERFACE")
+add_db("level_hash_db.cc" "Level-Hashing" "levelhash" ENABLE_LEVEL_HASH_DB "PUBLIC")
+add_db("masstree_db.cc" "Masstree" "masstree" ENABLE_MASSTREE_DB "PUBLIC")
+add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" ENABLE_RADIX_ART_OLC_DB "PUBLIC")
+add_db("sherman_db.cc" "Sherman" "sherman" ENABLE_SHERMAN_DB "PUBLIC")
+add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" ENABLE_BTREE_OLC_DB "PUBLIC")
+
+# Link libraries
+option(VARIANT "Build variant" "cc")
+message(STATUS "VARIANT: ${VARIANT}")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Define the executable
+macro(add_ycsbc_executable target_name compile_definitions)
+    string(REPLACE "ycsbc_" "" short_target_name ${target_name})
+    string(TOUPPER ${short_target_name} upper_target_name)
+    if(VARIANT STREQUAL ${short_target_name})
+        message(STATUS "DEF: ${compile_definitions}")
+        add_compile_definitions(${compile_definitions})
+        add_executable(${target_name} ${SUBSRCS})
+        target_link_libraries(${target_name} pthread tbb atomic ssh numa memkind)
+        target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        # Create unique library targets for each executable
+        foreach(lib ${public_link_libs})
+            if(TARGET ${lib})
+                target_link_libraries(${target_name} ${lib})
+                target_compile_definitions(${lib} PUBLIC ${compile_definitions})
+            endif()
+        endforeach()
+        foreach(lib ${interface_link_libs})
+            if(TARGET ${lib})
+                target_link_libraries(${target_name} ${lib})
+                target_compile_definitions(${lib} INTERFACE ${compile_definitions})
+            endif()
+        endforeach()
+    endif()
+endmacro()
+
+# Set different build options
+set(OPT_FLAGS "OPT_GC;OPT_ROOT_READ;OPT_IN_USE_FLAG;OPT_NO_META;OPT_CLEVEL_ROOT_READ")
+
+add_ycsbc_executable(ycsbc_cc "")
+add_ycsbc_executable(ycsbc_cc_mq "USE_MSG_QUEUE")
+add_ycsbc_executable(ycsbc_cc_nocc_mq "USE_MSG_QUEUE;USE_NO_CC_QUEUE")
+add_ycsbc_executable(ycsbc_nocc "NO_CC;${OPT_FLAGS}")
+add_ycsbc_executable(ycsbc_nocc_sim "NO_CC;${OPT_FLAGS};NT_SIM")
+add_ycsbc_executable(ycsbc_nocc_dup_flag "NO_CC;${OPT_FLAGS};OPT_DUP_IN_USE_FLAG=4")
+add_ycsbc_executable(ycsbc_nocc_no_opt "NO_CC")
+add_ycsbc_executable(ycsbc_nocc_part_opt "NO_CC;OPT_GC;OPT_ROOT_READ")
+add_ycsbc_executable(ycsbc_nocc_clevel_part1 "NO_CC;OPT_NO_META")
+add_ycsbc_executable(ycsbc_nocc_clevel_part2 "NO_CC;OPT_NO_META;OPT_BATCH_FLUSH")
+add_ycsbc_executable(ycsbc_nocc_bwtree_part1 "NO_CC;OPT_GC")
+add_ycsbc_executable(ycsbc_nocc_bwtree_part2 "NO_CC;OPT_GC;OPT_ROOT_READ")
+
+# add_executable(test test.cc)

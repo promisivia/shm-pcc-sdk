@@ -1,0 +1,26 @@
+# 设置源文件
+set(SOURCES
+    client.c
+    customer.c
+    manager.c
+    reservation.c
+    vacation.c
+    ${CMAKE_SOURCE_DIR}/lib/list.c
+    ${CMAKE_SOURCE_DIR}/lib/pair.c
+    ${CMAKE_SOURCE_DIR}/lib/mt19937ar.c
+    ${CMAKE_SOURCE_DIR}/lib/random.c
+    ${CMAKE_SOURCE_DIR}/lib/rbtree.c
+    ${CMAKE_SOURCE_DIR}/lib/thread.c
+)
+
+# 设置编译定义
+set(DEFINITIONS
+    LIST_NO_DUPLICATES
+    MAP_USE_RBTREE
+)
+
+# 设置基准测试名称
+set(BENCHMARK_NAME vacation)
+
+# 包含通用模板
+include(${CMAKE_SOURCE_DIR}/common/CMakeLists.txt.template) 

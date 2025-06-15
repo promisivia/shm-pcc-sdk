@@ -1,0 +1,17 @@
+# 创建可执行文件
+add_executable(${BENCHMARK_NAME} ${SOURCES})
+
+# 链接STM库
+target_link_libraries(${BENCHMARK_NAME} ${STM_IMPL} m)
+
+# 设置包含目录
+target_include_directories(${BENCHMARK_NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/common
+    ${CMAKE_SOURCE_DIR}/lib
+    ${STM_INSTALL_DIR}/include
+)
+
+# 添加编译定义
+if(DEFINED DEFINITIONS)
+    target_compile_definitions(${BENCHMARK_NAME} PRIVATE ${DEFINITIONS})
+endif() 
