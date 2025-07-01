@@ -41,8 +41,7 @@ redis/sample
 ycsbc
 
 log
-build_cc
-build_nocc
+build_*
 
 !build.sh
 !build_run.sh

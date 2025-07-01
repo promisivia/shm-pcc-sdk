@@ -99,28 +99,22 @@ int BTreeOLCDB::Read(const std::string& table, const std::string& key,
 }
 
 int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
+  int ret = DB::kOK;
+#ifdef TIMING_BTREEOLC
+  auto start = std::chrono::high_resolution_clock::now();
+#endif
 #ifdef USE_MSG_QUEUE
   bool finish = false;
   auto task = [this, key, &finish]() {
-#ifdef TIMING_BTREEOLC
-    auto start = std::chrono::high_resolution_clock::now();
-#endif
     std::string str_key = std::to_string(key);
     auto result = tree->Get(nullptr, str_key.c_str(), str_key.length(),
                             utils::IDPair(1,
                                           SimThreadInfo::dispatcher_thread_id));
     auto ret = (result == nullptr) ? DB::kErrorNoData : DB::kOK;
-#ifdef TIMING_BTREEOLC
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count();
-    total_read_time += duration;
-#endif
 #ifdef RETURN_SYNC
     finish = true;
 #endif
-    return ret;
+    goto out;
   };
 #ifdef RETURN_SYNC
   pool->enqueue(utils::RandomValueNum(), task);
@@ -132,14 +126,23 @@ int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
 #else
   while (finish != true);
 #endif
-  return DB::kOK;
+  goto out;
 #else
   pool->enqueue(utils::RandomValueNum(), task);
-  return DB::kOK;
+  goto out;
 #endif
 #else
   auto success = tree->lookup(key, value);
-  return (success)? DB::kOK : DB::kErrorNoData;
+  ret = (success) ? DB::kOK : DB::kErrorNoData;
+out:
+#ifdef TIMING_BTREEOLC
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+            .count();
+    total_read_time += duration;
+#endif
+  return ret;
 #endif
 }
 
@@ -192,25 +195,19 @@ int BTreeOLCDB::Update(const std::string& table, const std::string& key,
 }
 
 int BTreeOLCDB::UpdateInternal(uint64_t key, uint64_t value) {
+  int ret = DB::kOK;
+#ifdef TIMING_BTREEOLC
+  auto start = std::chrono::high_resolution_clock::now();
+#endif
 #ifdef USE_MSG_QUEUE
   bool finish = false;
   auto task = [this, key, &finish]() {
     std::string str_key = std::to_string(key);
-#ifdef TIMING_BTREEOLC
-    auto start = std::chrono::high_resolution_clock::now();
-#endif
     auto ret = tree->Put(str_key.c_str(), str_key.c_str());
-#ifdef TIMING_BTREEOLC
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count();
-    total_update_time += duration;
-#endif
 #ifdef RETURN_SYNC
     finish = true;
 #endif
-    return ret ? DB::kErrorNoData : DB::kOK;
+    goto out;
   };
 #ifdef RETURN_SYNC
   pool->enqueue(utils::RandomValueNum(), task);
@@ -222,15 +219,23 @@ int BTreeOLCDB::UpdateInternal(uint64_t key, uint64_t value) {
 #else
   while (finish != true);
 #endif
-  return DB::kOK;
+  goto out;
 #else
   pool->enqueue(utils::RandomValueNum(), task);
-  return DB::kOK;
+  goto out;
 #endif
 #else
   tree->insert(key, key);
-  return DB::kOK;
 #endif
+out:
+#ifdef TIMING_BTREEOLC
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+            .count();
+    total_update_time += duration;
+#endif
+  return ret;
 }
 
 int BTreeOLCDB::Insert(const std::string& table, const std::string& key,

@@ -6,8 +6,15 @@
 #include <immintrin.h>
 #include <sched.h>
 
+#ifdef LIMIT_ATOMIC
+#include "atomic.hpp"
+#include "utils/bypass_cache.h"
+#endif
+
+#ifdef NO_CC
 #include "utils/atomic_variable.h"
 #include "utils/config.h"
+#endif
 
 namespace btreeolc {
 
@@ -16,11 +23,16 @@ enum class PageType : uint8_t { BTreeInner=1, BTreeLeaf=2 };
 static const uint64_t pageSize=4*1024;
 
 struct OptLock {
-#ifdef NO_CC
+#ifdef LIMIT_ATOMIC
+  cxl_std::atomic<uint64_t> typeVersionLockObsolete{0b100};
+#elif defined(NO_CC)
   nt<uint64_t> typeVersionLockObsolete{0b100};
-  virtual void flush() = 0;
 #else
   std::atomic<uint64_t> typeVersionLockObsolete{0b100};
+#endif
+
+#if defined(NOCC_FLUSH_NODE) || (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
+  virtual void flush() = 0;
 #endif
 
   bool isLocked(uint64_t version) {
@@ -35,7 +47,7 @@ struct OptLock {
       needRestart = true;
     }
 
-#if defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE)
+#if defined(NOCC_FLUSH_NODE) || (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     /* Flush the node if lock is acquired */
     if (!needRestart && needFlush) flush();
 #endif
@@ -50,7 +62,7 @@ struct OptLock {
 
     upgradeToWriteLockOrRestart(version, needRestart);
     if (needRestart) return;
-#if defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE)
+#if defined(NOCC_FLUSH_NODE) || (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     else flush();
 #endif
   }
@@ -65,7 +77,7 @@ struct OptLock {
   }
 
   void writeUnlock(bool needFlush=false) {
-#if defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE)
+#if defined(NOCC_FLUSH_NODE) || (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     /* Only flush the node if node is modified */
     if (needFlush) flush();
 #endif
@@ -76,11 +88,11 @@ struct OptLock {
     return (version & 1) == 1;
   }
 
-  void checkOrRestart(uint64_t startRead, bool &needRestart) const {
+  void checkOrRestart(uint64_t startRead, bool &needRestart) {
     readUnlockOrRestart(startRead, needRestart);
   }
 
-  void readUnlockOrRestart(uint64_t startRead, bool &needRestart) const {
+  void readUnlockOrRestart(uint64_t startRead, bool &needRestart) {
     needRestart = (startRead != typeVersionLockObsolete.load());
   }
 

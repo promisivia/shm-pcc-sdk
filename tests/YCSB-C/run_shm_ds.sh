@@ -3,19 +3,38 @@
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 db_types=("clht" "levelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
-# DB_TYPE="sherman"
-DB_TYPE="bwtree"
-# DB_TYPE="radix_art_olc"
+DB_TYPE="btree_olc"
 MODE="test"
 # DBG_LEVEL=1
 TEST_TYPE="fixed_db"
-# TEST_TYPE="fixed_thread"
 # USE_MSG_QUEUE=1
 CONFIG_TYPE=""
 # ENABLE_CAT=""
-# ENABLE_CAT="true"
 ENABLE_SNIPER=0
 PERF=0
+
+# threads actually do the processing
+SERVER_THREADS_N=32
+# threads which dispatch requests
+CLIENT_THREADS_N=48
+DB_NUM=1
+MACHINE_NR=1
+FOLLOWER_LIST="localhost"
+CONFIG_PATH="config.ini"
+
+output_file="output.txt"
+throughput_file="throughput.txt"
+metric_file="metric.txt"
+repeat_count=3
+
+workloads=("workloada_zipfian.spec" "workloadb_zipfian.spec" "workloadc_zipfian.spec" "workloadh_zipfian.spec")
+real_workloads=(
+"cluster001" "cluster002" "cluster003" "cluster004" "cluster005" "cluster006" "cluster007" "cluster008" "cluster009" "cluster010" "cluster011" "cluster012" "cluster013" "cluster014" "cluster015" "cluster016" "cluster017" "cluster018" "cluster019" "cluster020" "cluster021" "cluster022" "cluster023" "cluster024" "cluster025" "cluster026" "cluster027" "cluster028" "cluster029" "cluster030" "cluster031" "cluster032" "cluster033" "cluster034" "cluster035" "cluster036" "cluster037" "cluster038" "cluster039" "cluster040" "cluster041" "cluster042" "cluster043" "cluster044" "cluster045" "cluster046" "cluster047"
+)
+
+db_nums=(1)
+thread_nums=(1 2 4 8 16 32 64 128)
+client_thread_nums=(2 4 8 16 32 64 128)
 
 # args: 1. -db=DB_TYPE, 2. -debug=DBG_LEVEL, 3. -test_type=TEST_TYPE, 4. -use-msg=USE_MSG_QUEUE
 for i in "$@"; do
@@ -84,36 +103,6 @@ get_ini_value() {
     # 未找到返回错误
     return 1
 }
-
-# threads actually do the processing
-SERVER_THREADS_N=32
-# threads which dispatch requests
-CLIENT_THREADS_N=48
-DB_NUM=1
-MACHINE_NR=2
-FOLLOWER_LIST="localhost"
-CONFIG_PATH="config.ini"
-
-output_file="output.txt"
-throughput_file="throughput.txt"
-metric_file="metric.txt"
-repeat_count=3
-
-# workloads=(
-# "workloada_zipfian_10m.spec" "workloadb_zipfian_10m.spec" "workloadc_zipfian_10m.spec" "workloadh_zipfian_10m.spec")
-workloads=(
-"workloada_zipfian.spec" 
-"workloadb_zipfian.spec" "workloadc_zipfian.spec" "workloadh_zipfian.spec"
-# "workloada_uniform.spec" "workloadb_uniform.spec" "workloadc_uniform.spec" "workloadh_uniform.spec"
-)
-# workloads=("workloada_uniform.spec" "workloadc_uniform.spec" "workloada_zipfian.spec" "workloadc_zipfian.spec")
-real_workloads=(
-"cluster001" "cluster002" "cluster003" "cluster004" "cluster005" "cluster006" "cluster007" "cluster008" "cluster009" "cluster010" "cluster011" "cluster012" "cluster013" "cluster014" "cluster015" "cluster016" "cluster017" "cluster018" "cluster019" "cluster020" "cluster021" "cluster022" "cluster023" "cluster024" "cluster025" "cluster026" "cluster027" "cluster028" "cluster029" "cluster030" "cluster031" "cluster032" "cluster033" "cluster034" "cluster035" "cluster036" "cluster037" "cluster038" "cluster039" "cluster040" "cluster041" "cluster042" "cluster043" "cluster044" "cluster045" "cluster046" "cluster047"
-)
-
-db_nums=(1)
-thread_nums=(1 2 4 8 16 32 64 128)
-client_thread_nums=(2 4 8 16 32 64 128)
 
 enable_cat() {
 	sudo pqos -I -e "llc:2=0x000f;"
