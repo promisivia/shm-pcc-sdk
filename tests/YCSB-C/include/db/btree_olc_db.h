@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-#include "../../src/BTreeOLC/BTreeOLC.h"
+#include "BTreeOLC.h"
 #include "core/db.h"
 #include "db/utils.h"
 
