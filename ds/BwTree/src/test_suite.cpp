@@ -22,7 +22,11 @@ TreeType *GetEmptyTree(bool no_print) {
     print_flag = true;
   }
 
-  void* alloc_base = cacheable.malloc(sizeof(TreeType));
+#ifdef USE_CXL
+  void *alloc_base = cacheable.malloc(sizeof(TreeType));
+#else
+  void *alloc_base = malloc(sizeof(TreeType));
+#endif
   TreeType *t1 = new (alloc_base)TreeType{true, KeyComparator{1},
   KeyEqualityChecker{1}};
     // TreeType *t1 = new TreeType{true, KeyComparator{1}, KeyEqualityChecker{1}};

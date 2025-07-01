@@ -10,7 +10,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "../benchmark/btree/btree_multimap.h"
+#include "../BTree/btree_multimap.h"
 #include "../benchmark/art/art.h"
 #include "bwtree.h"
 

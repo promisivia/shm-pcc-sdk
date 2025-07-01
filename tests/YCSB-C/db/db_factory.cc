@@ -12,6 +12,18 @@
 
 #include <string>
 
+// #define ENABLE_BTREE_DB
+// #define ENABLE_BWTREE_DB
+// #define ENABLE_BTREE_OLC_DB
+// #define ENABLE_RADIX_ART_OLC_DB
+// #define ENABLE_RADIX_ART_ROWEX_DB
+// #define ENABLE_LEVEL_HASH_DB
+// #define ENABLE_CLHT_DB
+// #define ENABLE_HOT_DB
+// #define ENABLE_MASSTREE_DB
+// #define ENABLE_CLEVEL_HASH_DB
+// #define ENABLE_SHERMAN_DB
+
 #ifdef ENABLE_BTREE_DB
 #include "db/btree_db.h"
 #endif

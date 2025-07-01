@@ -140,7 +140,7 @@ inline Epoche::~Epoche() {
             assert(cur->epoche < oldestEpoche);
             for (std::size_t i = 0; i < cur->nodesCount; ++i) { 
             #ifdef USE_CXL
-                cacheable.free(cur->nodes[i]);
+                cacheable.free(memkind_pool, cur->nodes[i]);
             #else
                 operator delete(cur->nodes[i]);
             #endif

@@ -14,6 +14,8 @@
 #include "db/utils.h"
 using namespace std;
 
+#include "test_suite.h"
+
 namespace ycsbc {
 
 class ShermanDB : public DB {

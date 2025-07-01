@@ -38,7 +38,7 @@ void BTreeOLCDB::Close() {
 
 int BTreeOLCDB::PoolThreadInit() {
   int thread_id = allocate();
-  // int machine_id = thread_id / (thread_num);
+  int machine_id = thread_id / (thread_num / MACHINE_N);
   // tree->AssignId(machine_id, thread_id);
   return thread_id;
 }

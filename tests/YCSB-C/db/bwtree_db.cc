@@ -1,3 +1,5 @@
+#include "db/bwtree_db.h"
+
 #include <numa.h>
 
 #include <cassert>
@@ -9,7 +11,6 @@
 #include "utils/timing.h"
 #include "db/utils.h"
 
-#include "db/bwtree_db.h"
 
 namespace ycsbc {
 #ifdef TIMING_LOAD_BALANCE

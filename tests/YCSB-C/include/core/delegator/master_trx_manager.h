@@ -53,12 +53,18 @@ public:
     WakeupFollowers(props);
     trx_thread_controller_->StartThreads();
 
+#ifdef SNIPER
+    SimRoiStart();
+#endif
     timer_.Start();
 
     trx_thread_controller_->StartExecution();
     trx_thread_controller_->WaitForLocalThreads();
     trx_thread_controller_->CollectResults(sum);
 
+#ifdef SNIPER
+    SimRoiEnd();
+#endif
     duration = timer_.End();
   }
 

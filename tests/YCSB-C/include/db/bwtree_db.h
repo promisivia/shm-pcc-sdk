@@ -5,9 +5,9 @@
 
 #include "core/db.h"
 #include "shm/cxl_type.h"
-#include "test_suite.h"
-
 using namespace std;
+
+#include "test_suite.h"
 
 namespace ycsbc {
 

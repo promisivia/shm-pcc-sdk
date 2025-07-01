@@ -10,10 +10,9 @@
 #include <thread>
 #include <vector>
 
-#include "BTreeOLC/BTreeOLC.h"
+#include "../../src/BTreeOLC/BTreeOLC.h"
 #include "core/db.h"
 #include "db/utils.h"
-#include "utils/id_pair.h"
 
 using namespace std;
 

@@ -1,0 +1,95 @@
+#pragma once
+
+#include <condition_variable>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <vector>
+
+#include "core/db.h"
+#include "db/utils.h"
+using namespace std;
+
+#include "future_queue.h"
+#include "test_suite.h"
+
+namespace ycsbc {
+
+class MicaDB : public DB {
+ public:
+  enum OP_TYPE {
+    READ = 0,
+    INSERT,
+    UPDATE,
+    DELETE,
+    SCAN,
+  };
+  class ThreadPool {
+   public:
+    ThreadPool(size_t threads, MicaDB& db);
+    ~ThreadPool();
+
+    void wait() const {
+      for (auto& t : tasks) {
+        while (!t.empty());
+      }
+    }
+
+#ifdef RETURN_SYNC
+    void enqueue(size_t id, OP_TYPE op, TreeType* tree, const std::string& key,
+                 int* result);
+#else
+    template <class F, class... Args>
+    auto enqueue(size_t id, F&& f, Args&&... args)
+        -> std::future<std::invoke_result_t<F, Args...>>;
+#endif
+
+   private:
+    static void* Worker(void* arg);
+    size_t thread_num;
+    std::vector<pthread_t> workers;
+    std::vector<CircularQueue<std::function<void()>>> tasks;
+    std::atomic<bool> stop;
+    MicaDB& tree;
+  };
+
+ public:
+  MicaDB(int thread_num = 1);
+  ~MicaDB();
+
+  void Init() override;
+  void Close() override;
+
+  int PoolThreadInit();
+  void PoolThreadClose(int thread_id);
+#ifndef USE_MSG_QUEUE
+  int ThreadInit() override;
+  void ThreadClose(int thread_id) override;
+#endif
+
+  int Read(const std::string& table, const std::string& key,
+           const std::vector<std::string>* fields,
+           std::vector<KVPair>& result) override;
+
+  int Scan(const std::string& table, const std::string& key, int len,
+           const std::vector<std::string>* fields,
+           std::vector<std::vector<KVPair>>& result) override;
+
+  int Update(const std::string& table, const std::string& key,
+             std::vector<KVPair>& values) override;
+
+  int Insert(const std::string& table, const std::string& key,
+             std::vector<KVPair>& values) override;
+
+  int Delete(const std::string& table, const std::string& key) override;
+
+  void InitStats() override;
+  void GetStats() override;
+
+ private:
+  struct mehcached_table *tables[num_partitions];
+};
+
+}  // namespace ycsbc

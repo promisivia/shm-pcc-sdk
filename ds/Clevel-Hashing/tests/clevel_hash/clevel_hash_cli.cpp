@@ -11,11 +11,7 @@
 #include <cstdio>
 
 #include "../../examples/libpmemobj_cpp_examples_common.hpp"
-#ifdef NO_CC
 #include <libpmemobj++/experimental/clevel_hash.hpp>
-#else
-#include <libpmemobj++/experimental/clevel_hash_original.hpp>
-#endif
 
 #define LAYOUT "clevel_hash"
 // #define KEY_LEN 15

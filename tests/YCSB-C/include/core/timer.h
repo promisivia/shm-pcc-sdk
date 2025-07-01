@@ -10,6 +10,9 @@
 #define YCSB_C_TIMER_H_
 
 #include <chrono>
+#ifdef SNIPER
+#include "utils/sim_api.h"
+#endif
 
 namespace utils {
 
@@ -31,7 +34,13 @@ private:
   typedef std::chrono::duration<T> Duration;
 
   Clock::time_point getNow() {
+#ifdef SNIPER
+    auto dur =
+        std::chrono::nanoseconds(static_cast<long long>(SimGetEmuTime()));
+    return Clock::time_point(std::chrono::duration_cast<Clock::duration>(dur));
+#else
     return Clock::now();
+#endif
   }
 
   Clock::time_point time_;

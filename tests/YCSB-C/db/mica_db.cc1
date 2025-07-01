@@ -1,0 +1,413 @@
+#include "db/mica_db.h"
+
+#include <numa.h>
+
+#include <cassert>
+
+#include "utils/cpu_dist.h"
+#include "utils/timing.h"
+
+#ifdef BWTREE_TIMING
+AvgTimer timer;
+#endif
+
+namespace ycsbc {
+inline size_t RandomThreadNum() {
+  thread_local static std::random_device rd;
+  thread_local static std::mt19937 gen(rd());
+  thread_local static std::uniform_int_distribution<> dis(1, 65536);
+  return dis(gen);
+}
+
+inline int RandomValueNum() {
+  thread_local static std::random_device rd;
+  thread_local static std::mt19937 gen(rd());
+  thread_local static std::uniform_int_distribution<> dis(1, INT32_MAX);
+  return dis(gen);
+}
+
+struct ThreadArg {
+  MicaDB::ThreadPool* pool;
+  size_t index;
+};
+
+MicaDB::ThreadPool::ThreadPool(size_t threads, MicaDB& db)
+    : thread_num(threads), stop(false), tree(db) {
+  for (size_t i = 0; i < threads; ++i) {
+    tasks.emplace_back(1024);
+  }
+  int first_numa_node_cpu = get_cpu_nr_numa(0);
+  for (size_t i = 0; i < threads; ++i) {
+    pthread_t worker;
+    ThreadArg* arg = new ThreadArg{this, i};
+    pthread_create(&worker, nullptr, Worker, arg);
+    cpu_set_t cpuset;
+    int avail_cpu = get_available_cpu_server();
+    CPU_ZERO(&cpuset);
+    // Use 1-3 numa nodes
+    CPU_SET(avail_cpu, &cpuset);
+    int rc = pthread_setaffinity_np(worker, sizeof(cpu_set_t), &cpuset);
+    if (rc != 0) {
+      std::cerr << "Error setting thread affinity for thread " << i
+                << std::endl;
+      exit(1);
+    }
+    workers.push_back(worker);
+  }
+}
+
+void* MicaDB::ThreadPool::Worker(void* arg) {
+  ThreadArg* thread_arg = static_cast<ThreadArg*>(arg);
+  MicaDB::ThreadPool* pool = thread_arg->pool;
+  size_t index = thread_arg->index;
+  delete thread_arg;
+
+  int thread_id = pool->tree.PoolThreadInit();
+  std::function<void()> task;
+  for (;;) {
+    while (pool->tasks[index].empty() && !pool->stop);
+    if (pool->stop) [[unlikely]] {
+      pool->tree.PoolThreadClose(thread_id);
+      return 0;
+    }
+    if (pool->tasks[index].dequeue(task)) {
+      task();
+    }
+  }
+  return nullptr;
+}
+
+#ifdef RETURN_SYNC
+void MicaDB::ThreadPool::enqueue(size_t id, OpType op, TreeType* tree,
+                                   const std::string& key, int* result) {
+  std::function<void()> task = [this, op, tree, key, result]() {
+    long key_index;
+    long rand_key;
+    std::vector<long> ret;
+    std::chrono::high_resolution_clock::time_point start;
+
+    switch (op) {
+      case READ:
+#ifdef BWTREE_TIMING
+        start = timer.Start();
+#endif
+        key_index = convert(key);
+        tree->GetValue(key_index, ret);
+#ifdef BWTREE_TIMING
+        timer.Track(start);
+#endif
+        *result = (!ret.empty() && ret[0] == key_index + 1) ? DB::kOK
+                                                            : DB::kErrorNoData;
+        break;
+      case INSERT:
+        key_index = convert(key);
+        *result =
+            tree->Insert(key_index, key_index + 1) ? DB::kOK : DB::kErrorNoData;
+        break;
+      case UPDATE:
+        rand_key = RandomValueNum();
+        *result =
+            tree->Insert(rand_key, rand_key + 1) ? DB::kOK : DB::kErrorNoData;
+        break;
+      case DELETE:
+        key_index = convert(key);
+        *result =
+            tree->Delete(key_index, key_index + 1) ? DB::kOK : DB::kErrorNoData;
+        break;
+      default:
+        std::cerr << "Unknown operation type: " << op << std::endl;
+        exit(1);
+    }
+  };
+  while (!tasks[id].enqueue(task));
+}
+#else
+template <class F, class... Args>
+auto MicaDB::ThreadPool::enqueue(size_t id, F&& f, Args&&... args)
+    -> std::future<std::invoke_result_t<F, Args...>> {
+  using return_type = std::invoke_result_t<F, Args...>;
+  auto task = std::make_shared<std::packaged_task<return_type()>>(
+      std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+  std::future<return_type> res = task->get_future();
+  while (!tasks[id].enqueue([task]() { (*task)(); }));
+  return res;
+}
+#endif
+
+MicaDB::ThreadPool::~ThreadPool() {
+  stop.store(true);
+  for (pthread_t worker : workers) {
+    pthread_join(worker, nullptr);
+  }
+}
+
+MicaDB::MicaDB(int thread_num)
+    : DB(), thread_num(thread_num), bits(thread_num), tree(GetEmptyTree(true)) {
+  
+#ifdef USE_MSG_QUEUE
+  pool = new ThreadPool(thread_num, *this);
+#endif
+}
+
+MicaDB::~MicaDB() {
+  tree->UpdateThreadLocal(1);
+  DestroyTree(tree, true);
+#ifdef USE_MSG_QUEUE
+  delete pool;
+#endif
+}
+
+void MicaDB::Init() {}
+
+void MicaDB::Close() {
+#ifdef USE_MSG_QUEUE
+  pool->wait();
+  while (!future_queue.empty());
+#endif
+  // printf("Read Time: %f\n", tree->GetTime());
+}
+
+int MicaDB::PoolThreadInit() {
+  int thread_id = allocate();
+  tree->AssignGCID(thread_id);
+  return thread_id;
+}
+
+void MicaDB::PoolThreadClose(int thread_id) {
+  tree->UnregisterThread(thread_id);
+  release(thread_id);
+}
+
+#ifndef USE_MSG_QUEUE
+int MicaDB::ThreadInit() {
+  int thread_id = allocate();
+  tree->AssignGCID(thread_id);
+  return thread_id;
+}
+
+void MicaDB::ThreadClose(int thread_id) {
+  tree->UnregisterThread(thread_id);
+  release(thread_id);
+}
+#endif
+
+int MicaDB::Read(const std::string& table, const std::string& key,
+                   const std::vector<std::string>* fields,
+                   std::vector<KVPair>& result) {
+#ifdef USE_MSG_QUEUE
+#ifdef RETURN_SYNC
+  int return_value = 0xF980AB;
+  pool->enqueue(RandomThreadNum() % thread_num, READ, tree, key, &return_value);
+#ifdef BWTREE_TIMING
+  auto start = timer.Start();
+#endif
+  // while (return_value == 0xF980AB) {
+  //   sched_yield();
+  // }
+#ifdef USE_MWAIT
+  _umonitor(&return_value);
+  while (return_value == 0xF980AB) {
+    _umwait(1, 0);
+  }
+#else
+  while (return_value == 0xF980AB);
+#endif
+#ifdef BWTREE_TIMING
+  timer.Track(start);
+#endif
+  assert(return_value == DB::kOK);
+#else
+  auto task = [this, key]() {
+    long int key_index = convert(key);
+    std::vector<long> ret;
+    tree->GetValue(key_index, ret);
+    return (*ret.begin() > 0) ? DB::kOK : DB::kErrorNoData;
+  };
+  auto future = pool->enqueue(RandomThreadNum() % thread_num, task);
+  future_queue.push(future);
+#endif
+#else
+  long int key_index = convert(key);
+  std::vector<long> ret;
+  tree->GetValue(key_index, ret);
+  if (ret.empty()) {
+    return DB::kErrorNoData;
+  }
+  assert(ret[0] == key_index + 1);
+#endif
+  read_cnt.fetch_add(1);
+  return DB::kOK;
+}
+
+int MicaDB::Scan(const std::string& table, const std::string& key, int len,
+                   const std::vector<std::string>* fields,
+                   std::vector<std::vector<KVPair>>& result) {
+#ifdef USE_MSG_QUEUE
+  throw "Scan: function not implemented!";
+#else
+  long key_index = convert(key);
+  auto element_iterator = tree->Begin(key_index);
+  for (int i = 0; i < len; i++) {
+    if (element_iterator.IsEnd()) {
+      break;
+    }
+    auto& element = *element_iterator;
+    if (element.second != element.first + 1) {
+      std::cerr << "Read Error: " << element.second << " " << element.first + 1
+                << std::endl;
+      return DB::kErrorNoData;
+    }
+    result.emplace_back();
+    element_iterator++;
+  }
+#endif
+  scan_cnt.fetch_add(1);
+  return DB::kOK;
+}
+
+int MicaDB::Update(const std::string& table, const std::string& key,
+                     std::vector<KVPair>& values) {
+#ifdef USE_MSG_QUEUE
+#ifdef RETURN_SYNC
+  int return_value = 0xF980AB;
+  pool->enqueue(RandomThreadNum() % thread_num, UPDATE, tree, key,
+                &return_value);
+  // while (return_value == 0xF980AB) {
+  //   sched_yield();
+  // }
+#ifdef USE_MWAIT
+  _umonitor(&return_value);
+  while (return_value == 0xF980AB) {
+    _umwait(1, 0);
+  }
+#else
+  while (return_value == 0xF980AB);
+#endif
+  // assert(return_value == DB::kOK);
+#else
+  auto task = [this, key]() {
+    // long key_index = convert(key);
+    long rand_key = RandomValueNum();
+    return tree->Insert(rand_key, rand_key + 1) ? DB::kOK : DB::kErrorNoData;
+  };
+  auto future = pool->enqueue(RandomThreadNum() % thread_num, task);
+  future_queue.push(future);
+#endif
+#else
+  // long key_index = convert(key);
+  long rand_key = RandomValueNum();
+  tree->Insert(rand_key, rand_key + 1);
+#endif
+  update_cnt.fetch_add(1);
+  return DB::kOK;
+}
+
+int MicaDB::Insert(const std::string& table, const std::string& key,
+                     std::vector<KVPair>& values) {
+#ifdef USE_MSG_QUEUE
+#ifdef RETURN_SYNC
+  int return_value = 0xF980AB;
+  pool->enqueue(RandomThreadNum() % thread_num, INSERT, tree, key,
+                &return_value);
+  // while (return_value == 0xF980AB) {
+  //   sched_yield();
+  // }
+#ifdef USE_MWAIT
+  _umonitor(&return_value);
+  while (return_value == 0xF980AB) {
+    _umwait(1, 0);
+  }
+#else
+  while (return_value == 0xF980AB);
+#endif
+  assert(return_value == DB::kOK);
+#else
+  auto task = [this, key]() {
+    long key_index = convert(key);
+    return tree->Insert(key_index, key_index + 1) ? DB::kOK : DB::kErrorNoData;
+  };
+  auto future = pool->enqueue(RandomThreadNum() % thread_num, task);
+  future_queue.push(future);
+#endif
+#else
+  long key_index = convert(key);
+  tree->Insert(key_index, key_index + 1);
+#endif
+  insert_cnt.fetch_add(1);
+  return DB::kOK;
+}
+
+int MicaDB::Delete(const std::string& table, const std::string& key) {
+#ifdef USE_MSG_QUEUE
+#ifdef RETURN_SYNC
+  int return_value = 0xF980AB;
+  pool->enqueue(RandomThreadNum() % thread_num, DELETE, tree, key,
+                &return_value);
+  // while (return_value == 0xF980AB) {
+  //   sched_yield();
+  // }
+#ifdef USE_MWAIT
+  _umonitor(&return_value);
+  while (return_value == 0xF980AB) {
+    _umwait(1, 0);
+  }
+#else
+  while (return_value == 0xF980AB);
+#endif
+  assert(return_value == DB::kOK);
+#else
+  auto task = [this, key]() {
+    long key_index = convert(key);
+    return tree->Delete(key_index, key_index + 1) ? DB::kOK : DB::kErrorNoData;
+  };
+  auto future = pool->enqueue(RandomThreadNum() % thread_num, task);
+  future_queue.push(future);
+#endif
+#else
+  long key_index = convert(key);
+  tree->Delete(key_index, key_index + 1);
+#endif
+  return DB::kOK;
+}
+
+void MicaDB::InitStats() {
+  read_cnt.store(0);
+  update_cnt.store(0);
+  insert_cnt.store(0);
+  scan_cnt.store(0);
+  // tree->total_count = 0;
+  // tree->total_read = 0;
+}
+
+void MicaDB::GetStats() {
+  std::cerr << "Read Count: " << read_cnt.load() << " ";
+  std::cerr << "Update Count: " << update_cnt.load() << " ";
+  std::cerr << "Insert Count: " << insert_cnt.load() << " ";
+  std::cerr << "Scan Count: " << scan_cnt.load() << std::endl;
+#ifdef BWTREE_TIMING
+  timer.Print();
+#endif
+  // std::cerr << "Average GetNode: " << tree->GetTime();
+  tree->reportTimers();
+}
+
+int MicaDB::allocate() {
+  for (int i = 0; i < thread_num; ++i) {
+    uint8_t expected = 0;
+    if (bits[i].compare_exchange_strong(expected, 1)) {
+      return i;
+    }
+  }
+  exit(1);
+  return -1;
+}
+
+void MicaDB::release(int id) {
+  if (id >= 0 && id < thread_num) {
+    bits[id].store(0);
+  } else {
+    exit(1);
+  }
+}
+
+}  // namespace ycsbc

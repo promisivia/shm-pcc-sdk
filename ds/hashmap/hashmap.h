@@ -12,7 +12,7 @@ class HashMap {
 
  public:
   HashMap() {
-    hashmap_ = (void **)cacheable.malloc(memkind_pool, BARREL * sizeof(void *));
+    hashmap_ = (void **)cacheable.malloc(BARREL * sizeof(void *));
     for (int i = 0; i < BARREL; i++) {
       lists.emplace_back(ListType());
       hashmap_[i] = lists[i].the_list;

@@ -14,6 +14,7 @@ TEST_TYPE="fixed_db"
 CONFIG_TYPE=""
 # ENABLE_CAT=""
 # ENABLE_CAT="true"
+ENABLE_SNIPER=0
 PERF=0
 
 # args: 1. -db=DB_TYPE, 2. -debug=DBG_LEVEL, 3. -test_type=TEST_TYPE, 4. -use-msg=USE_MSG_QUEUE
@@ -129,14 +130,18 @@ run_cmd() {
     if [ "$debug" = true ]; then
         cmd="gdb --args $cmd"
     fi
+	if [ "$ENABLE_SNIPER" = 1 ]; then
+		cmd="run-sniper -c cascade_lake.cfg -n 48 -v --roi -- $cmd"
+	fi
 	if [ "$PERF" = 1 ]; then
 		cmd="perf record -F 99 -g -- $cmd"
 	fi
 
+	echo 0 | sudo tee /proc/sys/kernel/randomize_va_space
+
 	local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
-	echo "shm_path: $shm_path"
-	sudo truncate -s 0 $shm_path
-	sudo truncate -s 32G $shm_path
+	truncate -s 0 $shm_path
+	truncate -s 32G $shm_path
 	sleep 1
 	echo $cmd
 
@@ -153,7 +158,7 @@ run_cmd() {
         fi
     }
     
-    if [ "$debug" != true ]; then
+    if [ "$debug" != true ] && [ "$ENABLE_SNIPER" != 1 ]; then
         while true; do
             run_with_cat "timeout 300 bash -c \"$cmd\""
             [ $? -eq 124 ] && echo "Command timed out, restarting..." || break
@@ -168,6 +173,8 @@ run_cmd() {
 		~/FlameGraph/flamegraph.pl out.folded > flamegraph.svg
 		rm -f out.perf out.folded perf.data*
 	fi
+
+	echo 2 | sudo tee /proc/sys/kernel/randomize_va_space
 }
 
 run_ycsbc() {
@@ -212,7 +219,7 @@ case $MODE in
 	thread_nums=(32)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloada_zipfian.spec"
+		run_ycsbc "workloadc_zipfian.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"

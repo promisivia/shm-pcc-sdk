@@ -65,6 +65,16 @@ void ThreadPool::init_timing_load_balance() {
 }
 #endif
 
+inline void relax_fence() {
+#if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
+    asm volatile("pause" : : : "memory");  // equivalent to "rep; nop"
+#elif defined(__aarch64__) || defined(__arm__)
+    asm volatile("yield" : : : "memory");  // ARM equivalent to pause
+#else
+    asm volatile("" : : : "memory");  // fallback for other architectures
+#endif
+}
+
 void ThreadPool::thread_job(int machine_id, size_t thread_id,
                             std::function<int()> alloc_task,
                             std::function<void(int)> release_task) {
@@ -109,7 +119,7 @@ void ThreadPool::thread_job(int machine_id, size_t thread_id,
               request_count++;
             }
 #endif
-            relax_fence_function();
+            relax_fence();
           }
         }
         std::unique_lock<std::mutex> lock(this->config_task_mutex);
@@ -119,7 +129,7 @@ void ThreadPool::thread_job(int machine_id, size_t thread_id,
       }
       order_index = (order_index + 1) % num_bucket;
       last_pos = bucket_order[order_index];
-      relax_fence_function();
+      relax_fence();
     }
   }
 }

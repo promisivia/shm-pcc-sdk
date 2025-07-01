@@ -4,24 +4,21 @@ cmake_minimum_required(VERSION 3.10)
 # Set the project name
 project(YCSBC)
 
-# Include the configuration file
-include(cmake.config)
-
 # Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-set(ROOT_DIR "../../")
-set(DS_DIR "${ROOT_DIR}/ds")
-set(LIB_DIR "${ROOT_DIR}/lib")
-
 find_package(Libssh REQUIRED)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -mcx16 -march=native -msse4.1")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i386|i686")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -mcx16 -march=native -msse4.1")
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -march=native")
+endif()
 #  -fsanitize=address -fno-omit-frame-pointer
 
-set(CMAKE_BUILD_TYPE Debug)
-# set(CMAKE_BUILD_TYPE Release)
+# set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 # Include directories
 include_directories(include)
@@ -33,44 +30,32 @@ set(public_link_libs "")
 set(interface_link_libs "")
 
 macro(add_db db_file db_dir lib_name program_macro link_type)
-    if(${program_macro} STREQUAL "ON")
-        list(APPEND SUBSRCS db/${db_file})
-        if(${link_type} STREQUAL "PUBLIC")
-            list(APPEND public_link_libs ${lib_name})
-        elseif(${link_type} STREQUAL "INTERFACE")
-            list(APPEND interface_link_libs ${lib_name})
-        endif()
-        
-        # Check if the directory exists and has a CMakeLists.txt
-        if(EXISTS "${DS_DIR}/${db_dir}/CMakeLists.txt")
-            add_subdirectory(${DS_DIR}/${db_dir} ${CMAKE_BINARY_DIR}/${db_dir})
-        else()
-            # For header-only libraries, just add the include directory
-            include_directories(${DS_DIR}/${db_dir})
-            # Remove from link libraries since it's header-only
-            list(REMOVE_ITEM public_link_libs ${lib_name})
-            list(REMOVE_ITEM interface_link_libs ${lib_name})
-        endif()
-        
-        add_compile_definitions(${program_macro})
+    list(APPEND SUBSRCS db/${db_file})
+    if(${link_type} STREQUAL "PUBLIC")
+        list(APPEND public_link_libs ${lib_name})
+    elseif(${link_type} STREQUAL "INTERFACE")
+        list(APPEND interface_link_libs ${lib_name})
     endif()
+    add_subdirectory(../../ds/${db_dir} ${CMAKE_BINARY_DIR}/${db_dir})
+    add_compile_definitions(${program_macro})
 endmacro()
 
-add_subdirectory(${LIB_DIR} ${CMAKE_BINARY_DIR}/lib)
+add_subdirectory(../../ds/shm ${CMAKE_BINARY_DIR}/shm)
 list(APPEND public_link_libs shm-lib)
 
-# Add databases based on configuration
-add_db("bwtree_db.cc" "BwTree" "bwtree" ENABLE_BWTREE_DB "PUBLIC")
-add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" ENABLE_CLEVEL_HASH_DB "INTERFACE")
-add_db("clht_db.cc" "CLHT" "clht" ENABLE_CLHT_DB "PUBLIC")
-add_db("hot_db.cc" "HOT" "hot" ENABLE_HOT_DB "INTERFACE")
-add_db("level_hash_db.cc" "Level-Hashing" "levelhash" ENABLE_LEVEL_HASH_DB "PUBLIC")
-add_db("masstree_db.cc" "Masstree" "masstree" ENABLE_MASSTREE_DB "PUBLIC")
-add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" ENABLE_RADIX_ART_OLC_DB "PUBLIC")
-add_db("sherman_db.cc" "Sherman" "sherman" ENABLE_SHERMAN_DB "PUBLIC")
-add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" ENABLE_BTREE_OLC_DB "PUBLIC")
+add_db("bwtree_db.cc" "BwTree" "bwtree" "ENABLE_BWTREE_DB" "PUBLIC")
+# add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
+# add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
+# add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
+# add_db("level_hash_db.cc" "Level-Hashing" "levelhash" "ENABLE_LEVEL_HASH_DB" "PUBLIC")
+# add_db("masstree_db.cc" "Masstree" "masstree" "ENABLE_MASSTREE_DB" "PUBLIC")
+# add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" "ENABLE_RADIX_ART_OLC_DB" "PUBLIC")
+# add_db("sherman_db.cc" "Sherman" "sherman" "ENABLE_SHERMAN_DB" "PUBLIC")
+# add_db("btree_db.cc" "btree" "USE_BTREE")
+# add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" "USE_BTREE" "PUBLIC")
 
 # Link libraries
+
 option(VARIANT "Build variant" "cc")
 message(STATUS "VARIANT: ${VARIANT}")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -83,21 +68,19 @@ macro(add_ycsbc_executable target_name compile_definitions)
         message(STATUS "DEF: ${compile_definitions}")
         add_compile_definitions(${compile_definitions})
         add_executable(${target_name} ${SUBSRCS})
-        target_link_libraries(${target_name} pthread tbb atomic ssh numa memkind)
         target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
         # Create unique library targets for each executable
         foreach(lib ${public_link_libs})
-            if(TARGET ${lib})
-                target_link_libraries(${target_name} ${lib})
-                target_compile_definitions(${lib} PUBLIC ${compile_definitions})
-            endif()
+            target_link_libraries(${target_name} ${lib})
+            target_compile_definitions(${lib} PUBLIC ${compile_definitions})
         endforeach()
         foreach(lib ${interface_link_libs})
-            if(TARGET ${lib})
-                target_link_libraries(${target_name} ${lib})
-                target_compile_definitions(${lib} INTERFACE ${compile_definitions})
-            endif()
+            target_link_libraries(${target_name} ${lib})
+            target_compile_definitions(${lib} INTERFACE ${compile_definitions})
         endforeach()
+        target_link_libraries(${target_name} pthread tbb atomic ssh numa memkind)
+        set_target_properties(${target_name} PROPERTIES ENABLE_EXPORTS ON)
+        set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
     endif()
 endmacro()
 

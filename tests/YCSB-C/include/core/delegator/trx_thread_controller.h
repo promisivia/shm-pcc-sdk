@@ -46,6 +46,7 @@ public:
                                       SimThreadInfo::worker_machine_count;
     for (uint32_t i = mid * dispatcher_per_machine;
          i < (mid + 1) * dispatcher_per_machine; i++) {
+#ifndef SNIPER
       pthread_attr_t attr;
       int cpu_id;
 #ifdef USE_MSG_QUEUE
@@ -59,6 +60,11 @@ public:
       pthread_create(&threads_[i], &attr,
                      &TransactionThreadController::DelegateClientTransWrapper,
                      (void *)&thread_args_[i]);
+#else
+      pthread_create(&threads_[i], nullptr,
+                     &TransactionThreadController::DelegateClientTransWrapper,
+                     (void *)&thread_args_[i]);
+#endif
     }
   }
 

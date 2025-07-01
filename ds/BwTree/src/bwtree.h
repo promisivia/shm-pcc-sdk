@@ -35,7 +35,6 @@
 #include <cstdio>
 #include <vector>
 
-#include "shm/memkind.h"
 #include "utils/atomic_variable.h"
 #include "utils/config.h"
 #include "utils/timing.h"
@@ -410,7 +409,7 @@ protected:
     }
 
     // Free memory using original pointer rather than adjusted pointer
-    free(original_p);
+    cacheable.free(original_p);
 
     return;
   }
@@ -426,13 +425,18 @@ protected:
     // This is the unaligned base address
     // We allocate one more element than requested as the buffer
     // for doing alignment
+    {
 #ifndef NT_SIM
-    original_p =
-        static_cast<unsigned char *>(malloc(cl_size * (thread_num + 1)));
+      size_t malloc_size = cl_size * (thread_num + 1);
 #else
-    original_p =
-        static_cast<unsigned char *>(malloc(cl_size * 3 * (thread_num + 1)));
+      size_t malloc_size = cl_size * 3 * (thread_num + 1);
 #endif
+#ifdef USE_CXL
+      original_p = static_cast<unsigned char *>(cacheable.malloc(malloc_size));
+#else
+      original_p = static_cast<unsigned char *>(malloc(malloc_size));
+#endif
+    }
     assert(original_p != nullptr);
 
     // Align the address to cache line boundary
@@ -452,13 +456,18 @@ protected:
     }
 
 #ifdef OPT_ROOT_READ
+        {
 #ifndef NT_SIM
-    original_p2 =
-        static_cast<unsigned char *>(malloc(cl_size * (thread_num + 1)));
+      size_t malloc_size = cl_size * (thread_num + 1);
 #else
-    original_p2 =
-        static_cast<unsigned char *>(malloc(cl_size * 3 * (thread_num + 1)));
+      size_t malloc_size = cl_size * 3 * (thread_num + 1);
 #endif
+#ifdef USE_CXL
+      original_p2 = static_cast<unsigned char *>(cacheable.malloc(malloc_size));
+#else
+      original_p2 = static_cast<unsigned char *>(malloc(malloc_size));
+#endif
+    }
     assert(original_p2 != nullptr);
 
     // Align the address to cache line boundary
@@ -3280,7 +3289,7 @@ private:
     // global_root_id here.
     // Not a good solution, think about it next day
     return GetCurrentMetaData()->cached_root_id.load(std::memory_order_seq_cst,
-                                                     false);
+                                                     bypass_cache);
 #elif defined(NO_CC)
     return root_id.load(std::memory_order_seq_cst, bypass_cache);
 #else
