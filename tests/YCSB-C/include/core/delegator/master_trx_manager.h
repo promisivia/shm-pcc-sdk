@@ -50,7 +50,9 @@ public:
 
   void Execute(utils::Properties &props, double &duration, uint64_t &sum) {
     trx_thread_controller_->PrepareThreads();
-    WakeupFollowers(props);
+    if (props.GetProperty("machine_nr", "1") > "1") {
+      WakeupFollowers(props);
+    }
     trx_thread_controller_->StartThreads();
 
 #ifdef SNIPER

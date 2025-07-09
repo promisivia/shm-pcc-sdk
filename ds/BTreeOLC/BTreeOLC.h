@@ -16,15 +16,18 @@
 #include "utils/config.h"
 #endif
 
+// #define COUNT_TOTAL_ATOMIC
+
 namespace btreeolc {
 
 enum class PageType : uint8_t { BTreeInner=1, BTreeLeaf=2 };
 
 static const uint64_t pageSize=4*1024;
+// static const uint64_t pageSize=512;
 
 struct OptLock {
 #ifdef LIMIT_ATOMIC
-  cxl_std::atomic<uint64_t> typeVersionLockObsolete{0b100};
+  std::atomic<uint64_t> typeVersionLockObsolete{0b100};
 #elif defined(NO_CC)
   nt<uint64_t> typeVersionLockObsolete{0b100};
 #else
@@ -265,14 +268,30 @@ struct BTreeInner : public BTreeInnerBase {
 
 template<class Key,class Value>
 struct BTree {
+#ifdef LIMIT_ATOMIC
   std::atomic<NodeBase*> root;
+#elif defined(NO_CC)
+  nt<NodeBase*> root;
+#else
+  std::atomic<NodeBase*> root;
+#endif
+
+#ifdef COUNT_TOTAL_ATOMIC
+  std::atomic<uint64_t> total_node_count {0};
+#endif
 
    BTree() {
       root = new BTreeLeaf<Key,Value>();
+#ifdef COUNT_TOTAL_ATOMIC
+      total_node_count.fetch_add(1);
+#endif
    }
 
    void makeRoot(Key k,NodeBase* leftChild,NodeBase* rightChild) {
       auto inner = new BTreeInner<Key>();
+#ifdef COUNT_TOTAL_ATOMIC
+      total_node_count.fetch_add(1);
+#endif
       inner->count = 1;
       inner->keys[0] = k;
       inner->children[0] = leftChild;
@@ -285,6 +304,15 @@ struct BTree {
       sched_yield();
     else
       _mm_pause();
+  }
+
+  void getStats() {
+#ifdef COUNT_TOTAL_ATOMIC
+    std::cout << "total node count: " << this->total_node_count.load() << std::endl;
+#endif
+#ifdef LIMIT_ATOMIC
+  cxl_std::atomic_statistic();
+#endif
   }
 
   void insert(Key k, Value v) 
@@ -334,6 +362,9 @@ struct BTree {
         // Split
         Key sep;
         BTreeInner<Key> *newInner = inner->split(sep);
+#ifdef COUNT_TOTAL_ATOMIC
+        total_node_count.fetch_add(1);
+#endif
         if (parent)
           parent->insert(sep, newInner);
         else
@@ -391,6 +422,9 @@ struct BTree {
       // Split
       Key sep;
       BTreeLeaf<Key, Value> *newLeaf = leaf->split(sep);
+#ifdef COUNT_TOTAL_ATOMIC
+      total_node_count.fetch_add(1);
+#endif
       if (parent)
         parent->insert(sep, newLeaf);
       else

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <mutex>
 #include <random>
+#include <iostream>
 
 namespace ycsbc {
 
@@ -38,7 +39,9 @@ class UniformGenerator : public Generator<uint64_t> {
 inline uint64_t UniformGenerator::Next() {
   std::uniform_int_distribution<uint64_t> dist_(min, max);
   // std::lock_guard<std::mutex> lock(mutex_);
-  return last_int_ = dist_(generator_);
+  uint64_t last_int_ = dist_(generator_);
+  // std::cout << "last_int_: " << last_int_ << std::endl;
+  return last_int_;
 }
 
 inline uint64_t UniformGenerator::Last() {

@@ -19,7 +19,7 @@
 // #define QUEUE_LATENCY_BREAKDOWN
 // #define BWTREE_RETRY_COUNT
 // #define CLEVEL_DOUBLE_READ_COUNT
-// #define TRX_TYPE_STAT
+#define TRX_TYPE_STAT
 // #define BWTREE_RETRY_COUNT
 
 /*

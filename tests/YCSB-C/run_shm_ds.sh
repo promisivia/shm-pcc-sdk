@@ -208,7 +208,7 @@ case $MODE in
 	thread_nums=(32)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloadc_zipfian.spec"
+		run_ycsbc "workloadc_uniform.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"

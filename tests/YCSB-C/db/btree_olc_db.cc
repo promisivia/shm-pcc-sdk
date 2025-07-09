@@ -334,6 +334,7 @@ void BTreeOLCDB::GetStats() {
               << std::endl;
   }
 #endif
+  tree->getStats();
 }
 
 int BTreeOLCDB::allocate() {

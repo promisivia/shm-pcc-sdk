@@ -138,7 +138,7 @@ void master_process(utils::Properties &props) {
 
 #ifdef TRX_TYPE_STAT
   for (uint32_t i = 0; i < SimThreadInfo::worker_db_count; i++) {
-    auto &db = dbs[i];
+    auto &db = (*dbs)[i];
     std::cerr << "DB " << i << ": ";
     db->GetStats();
   }
