@@ -27,7 +27,7 @@ static const uint64_t pageSize=4*1024;
 
 struct OptLock {
 #ifdef LIMIT_ATOMIC
-  std::atomic<uint64_t> typeVersionLockObsolete{0b100};
+  cxl_std::atomic<uint64_t> typeVersionLockObsolete{0b100};
 #elif defined(NO_CC)
   nt<uint64_t> typeVersionLockObsolete{0b100};
 #else
@@ -104,7 +104,7 @@ struct OptLock {
   }
 };
 
-struct NodeBase : public OptLock{
+struct alignas(64) NodeBase : public OptLock{
   PageType type;
   uint16_t count;
 };
@@ -133,7 +133,7 @@ struct BTreeLeaf : public BTreeLeafBase {
    bool isFull() { return count==maxEntries; };
 
    void flush() {
-    clwb(this, sizeof(BTreeLeaf));
+    clwb(this, pageSize);
    }
 
    unsigned lowerBound(Key k) {
@@ -269,7 +269,7 @@ struct BTreeInner : public BTreeInnerBase {
 template<class Key,class Value>
 struct BTree {
 #ifdef LIMIT_ATOMIC
-  std::atomic<NodeBase*> root;
+  cxl_std::atomic<NodeBase*> root;
 #elif defined(NO_CC)
   nt<NodeBase*> root;
 #else
@@ -282,6 +282,7 @@ struct BTree {
 
    BTree() {
       root = new BTreeLeaf<Key,Value>();
+    printf("first root %p\n", root);
 #ifdef COUNT_TOTAL_ATOMIC
       total_node_count.fetch_add(1);
 #endif
@@ -296,7 +297,9 @@ struct BTree {
       inner->keys[0] = k;
       inner->children[0] = leftChild;
       inner->children[1] = rightChild;
+      printf("make new root old %p ", root.load());
       root = inner;
+      printf("new %p\n", root.load());
    }
 
   void yield(int count) {
@@ -324,6 +327,7 @@ struct BTree {
     bool needRestart = false;
 
     // Current node
+    // printf("insert: access root %p\n", root);
     NodeBase *node = root;
     uint64_t versionNode = node->readLockOrRestart(needRestart);
     if (needRestart || (node != root))

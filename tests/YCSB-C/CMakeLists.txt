@@ -49,7 +49,7 @@ endmacro()
 add_subdirectory(../../shm-lib ${CMAKE_BINARY_DIR}/shm-lib)
 list(APPEND public_link_libs shm-lib)
 
-set(ATOMIC_IMPL_TYPE "Hashbased" CACHE STRING "Atomic implementation type" FORCE)
+set(ATOMIC_IMPL_TYPE "Indirect" CACHE STRING "Atomic implementation type" FORCE)
 add_subdirectory(../../atomic atomic)
 list(APPEND public_link_libs atomic-lib)
 
