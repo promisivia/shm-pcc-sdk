@@ -282,7 +282,7 @@ struct BTree {
 
    BTree() {
       root = new BTreeLeaf<Key,Value>();
-    printf("first root %p\n", root);
+    printf("first root %p\n", root.load());
 #ifdef COUNT_TOTAL_ATOMIC
       total_node_count.fetch_add(1);
 #endif
