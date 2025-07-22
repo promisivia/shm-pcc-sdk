@@ -128,10 +128,10 @@ run_cmd() {
 
 	echo 0 | sudo tee /proc/sys/kernel/randomize_va_space
 
-	local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
-	truncate -s 0 $shm_path
-	truncate -s 32G $shm_path
-	sleep 1
+	# local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
+	# truncate -s 0 $shm_path
+	# truncate -s 32G $shm_path
+	# sleep 1
 	echo $cmd
 
 	run_with_cat() {
@@ -149,7 +149,7 @@ run_cmd() {
     
     if [ "$debug" != true ] && [ "$ENABLE_SNIPER" != 1 ]; then
         while true; do
-            run_with_cat "timeout 300 bash -c \"$cmd\""
+            run_with_cat "bash -c \"$cmd\""
             [ $? -eq 124 ] && echo "Command timed out, restarting..." || break
         done
     else

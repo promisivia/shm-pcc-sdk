@@ -9,7 +9,8 @@
 namespace ycsbc {
 
 BTreeOLCDB::BTreeOLCDB(int thread_num)
-    : DB(), thread_num(thread_num), bits(thread_num), tree(new btreeolc::BTree<uint64_t, uint64_t>()) {
+    : DB(), tree(new btreeolc::BTree<uint64_t, uint64_t>()),
+      thread_num(thread_num), bits(thread_num) {
   for (int i = 0; i < thread_num; ++i) {
     bits[i].store(false);
   }
@@ -53,9 +54,9 @@ std::atomic<size_t> total_read_time = 0;
 std::atomic<size_t> total_update_time = 0;
 #endif
 
-int BTreeOLCDB::Read(const std::string& table, const std::string& key,
-                     const std::vector<std::string>* fields,
-                     std::vector<KVPair>& result) {
+int BTreeOLCDB::Read(const std::string &table, const std::string &key,
+                     const std::vector<std::string> *fields,
+                     std::vector<KVPair> &result) {
   bool finish = false;
   auto task = [this, key, &finish]() {
 #ifdef TIMING_BTREEOLC
@@ -86,7 +87,8 @@ int BTreeOLCDB::Read(const std::string& table, const std::string& key,
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   return DB::kOK;
 #else
@@ -98,7 +100,7 @@ int BTreeOLCDB::Read(const std::string& table, const std::string& key,
 #endif
 }
 
-int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
+int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t &value) {
   int ret = DB::kOK;
 #ifdef TIMING_BTREEOLC
   auto start = std::chrono::high_resolution_clock::now();
@@ -107,9 +109,9 @@ int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
   bool finish = false;
   auto task = [this, key, &finish]() {
     std::string str_key = std::to_string(key);
-    auto result = tree->Get(nullptr, str_key.c_str(), str_key.length(),
-                            utils::IDPair(1,
-                                          SimThreadInfo::dispatcher_thread_id));
+    auto result =
+        tree->Get(nullptr, str_key.c_str(), str_key.length(),
+                  utils::IDPair(1, SimThreadInfo::dispatcher_thread_id));
     auto ret = (result == nullptr) ? DB::kErrorNoData : DB::kOK;
 #ifdef RETURN_SYNC
     finish = true;
@@ -124,7 +126,8 @@ int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   goto out;
 #else
@@ -136,24 +139,23 @@ int BTreeOLCDB::ReadInternal(uint64_t key, uint64_t& value) {
   ret = (success) ? DB::kOK : DB::kErrorNoData;
 out:
 #ifdef TIMING_BTREEOLC
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count();
-    total_read_time += duration;
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  total_read_time += duration;
 #endif
   return ret;
 #endif
 }
 
-int BTreeOLCDB::Scan(const std::string& table, const std::string& key, int len,
-                     const std::vector<std::string>* fields,
-                     std::vector<std::vector<KVPair>>& result) {
+int BTreeOLCDB::Scan(const std::string &table, const std::string &key, int len,
+                     const std::vector<std::string> *fields,
+                     std::vector<std::vector<KVPair>> &result) {
   throw "Scan: function not implemented!";
 }
 
-int BTreeOLCDB::Update(const std::string& table, const std::string& key,
-                       std::vector<KVPair>& values) {
+int BTreeOLCDB::Update(const std::string &table, const std::string &key,
+                       std::vector<KVPair> &values) {
   bool finish = false;
   auto task = [this, key, &finish]() {
 #ifdef TIMING_BTREEOLC
@@ -182,7 +184,8 @@ int BTreeOLCDB::Update(const std::string& table, const std::string& key,
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   return DB::kOK;
 #else
@@ -217,7 +220,8 @@ int BTreeOLCDB::UpdateInternal(uint64_t key, uint64_t value) {
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   goto out;
 #else
@@ -229,17 +233,16 @@ int BTreeOLCDB::UpdateInternal(uint64_t key, uint64_t value) {
 #endif
 out:
 #ifdef TIMING_BTREEOLC
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
-            .count();
-    total_update_time += duration;
+  auto end = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  total_update_time += duration;
 #endif
   return ret;
 }
 
-int BTreeOLCDB::Insert(const std::string& table, const std::string& key,
-                       std::vector<KVPair>& values) {
+int BTreeOLCDB::Insert(const std::string &table, const std::string &key,
+                       std::vector<KVPair> &values) {
   bool finish = false;
   auto task = [this, key, values, &finish]() {
     long key_index = convert_std_hash(key);
@@ -258,7 +261,8 @@ int BTreeOLCDB::Insert(const std::string& table, const std::string& key,
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   return DB::kOK;
 #else
@@ -289,7 +293,8 @@ int BTreeOLCDB::InsertInternal(uint64_t key, uint64_t value) {
     _umwait(0, 1);
   }
 #else
-  while (finish != true);
+  while (finish != true)
+    ;
 #endif
   return DB::kOK;
 #else
@@ -302,7 +307,7 @@ int BTreeOLCDB::InsertInternal(uint64_t key, uint64_t value) {
 #endif
 }
 
-int BTreeOLCDB::Delete(const std::string& table, const std::string& key) {
+int BTreeOLCDB::Delete(const std::string &table, const std::string &key) {
   throw "Delete: function not implemented!";
 }
 
@@ -360,4 +365,4 @@ void BTreeOLCDB::release(int id) {
   }
 }
 
-}  // namespace ycsbc
+} // namespace ycsbc

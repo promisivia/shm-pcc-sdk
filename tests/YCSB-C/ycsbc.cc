@@ -31,6 +31,8 @@
 #include "utils/helper.h"
 #include "utils/sim_id.h"
 
+#include "atomic.hpp"
+
 void PrepareShmEnv(inicpp::IniManager &ini) {
   auto cacheable_ini = ini["shm/cacheable"];
   std::string mem_type = cacheable_ini["mem_type"];
@@ -173,6 +175,8 @@ void follower_process(utils::Properties &props) {
 }
 
 int main(const int argc, const char *argv[]) {
+  cxl_std::init_atomic_library(0, getpid());
+
   InitStatistics();
   utils::Properties props;
   std::string file_name = utils::ParseCommandLine(argc, argv, props);
