@@ -58,6 +58,7 @@ int BTreeOLCDB::Read(const std::string &table, const std::string &key,
                      const std::vector<std::string> *fields,
                      std::vector<KVPair> &result) {
   bool finish = false;
+  // read_cnt.fetch_add(1);
   auto task = [this, key, &finish]() {
 #ifdef TIMING_BTREEOLC
     auto start = std::chrono::high_resolution_clock::now();
@@ -76,7 +77,7 @@ int BTreeOLCDB::Read(const std::string &table, const std::string &key,
 #ifdef RETURN_SYNC
     finish = true;
 #endif
-    return DB::kOK;
+    return ret;
   };
 #ifdef USE_MSG_QUEUE
 #ifdef RETURN_SYNC
@@ -157,6 +158,7 @@ int BTreeOLCDB::Scan(const std::string &table, const std::string &key, int len,
 int BTreeOLCDB::Update(const std::string &table, const std::string &key,
                        std::vector<KVPair> &values) {
   bool finish = false;
+  // update_cnt.fetch_add(1);
   auto task = [this, key, &finish]() {
 #ifdef TIMING_BTREEOLC
     auto start = std::chrono::high_resolution_clock::now();
@@ -244,6 +246,7 @@ out:
 int BTreeOLCDB::Insert(const std::string &table, const std::string &key,
                        std::vector<KVPair> &values) {
   bool finish = false;
+  // insert_cnt.fetch_add(1);
   auto task = [this, key, values, &finish]() {
     long key_index = convert_std_hash(key);
     tree->insert(key_index, key_index);

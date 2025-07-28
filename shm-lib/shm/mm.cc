@@ -20,7 +20,8 @@ SystemMemoryMmapper::SystemMemoryMmapper(const char *path) : mmap_base(nullptr) 
   strcpy(this->path, path);
   fd = open(path, O_RDWR);
   if (fd < 0) {
-    throw std::runtime_error("Failed to open mmap device.");
+    std::string error_msg = "Failed to open mmap device. " + std::string(path);
+    throw std::runtime_error(error_msg);
   }
 }
 
