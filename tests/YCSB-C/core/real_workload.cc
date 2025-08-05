@@ -4,6 +4,7 @@
 #include "core/uniform_generator.h"
 #include "core/real_workload.h"
 #include "db/utils.h"
+#include "db/csv.hpp"
 
 namespace ycsbc {
 
@@ -39,65 +40,75 @@ void RealWorkload::Init(utils::Properties &p) {
   int op_count = 0;
   std::string wl_fname;
   wl_fname = sample_path + "/" + trace + "/" + workload_name;
-  std::ifstream file(wl_fname);
-  std::string line;
-
-  if (!file.is_open()) {
-    std::cerr << "open file error! " << wl_fname << std::endl;
-    return;
-  }
-
+  
   // A map that when a entry is read, whether it exists in the DB. If not, then we need to insert it in advance
   std::unordered_map<std::string, bool> records_exist_map;
   // Value size of non-existing records, need to load into the DB in advance
   std::vector<uint64_t> prefill_value_size;
   // Value size of traces that update or insert new entry
   std::vector<uint64_t> transaction_value_size;
-
-  while (std::getline(file, line)) {
-    if (line.empty()) {
-      continue;
-    }
-
-    std::istringstream iss(line);
-    SingleTrace trace;
-
-    char comma;
-    std::string opbuf;
-    if (iss >> trace.ts >> comma && std::getline(iss, trace.key, ',') &&
-        iss >> trace.key_size >> comma && iss >> trace.val_size >> comma &&
-        iss >> trace.cid >> comma && std::getline(iss, opbuf, ',') &&
-        iss >> trace.ttl) {
-      OpType op = ParseOp(opbuf);
-      if (op == UNSUPPORTED) {
-        continue;
+  
+  try {
+      csv::CSVReader reader(wl_fname);
+      
+      for (csv::CSVRow& row : reader) {
+          if (row.size() < 7) { // Check if row has enough columns
+              std::cerr << "Invalid row format: insufficient columns" << std::endl;
+              continue;
+          }
+          
+          SingleTrace trace;
+          
+          try {
+              // Parse each field from the CSV row
+              trace.ts = row[0].get<uint64_t>();
+              trace.key = row[1].get<std::string>();
+              trace.key_size = row[2].get<uint32_t>();
+              trace.val_size = row[3].get<uint64_t>();
+              trace.cid = row[4].get<uint32_t>();
+              std::string opbuf = row[5].get<std::string>();
+              trace.ttl = row[6].get<uint32_t>();
+              
+              OpType op = ParseOp(opbuf);
+              if (op == UNSUPPORTED) {
+                  continue;
+              }
+              
+              if (trace.key.empty()) {
+                  continue;
+              }
+              
+              trace.op = op;
+              op_count++;
+              
+              if (op == READ && records_exist_map[trace.key] == false) {
+                  record_list.emplace_back(trace.key);
+                  prefill_value_size.emplace_back(trace.val_size);
+              }
+              
+              records_exist_map[trace.key] = true;
+              trace_list.emplace_back(trace);
+              
+              if (op == INSERT || op == UPDATE) {
+                  transaction_value_size.emplace_back(trace.val_size);
+              }
+              
+          } catch (const std::exception& e) {
+              std::cerr << "Parse error in row: " << e.what() << std::endl;
+              continue;
+          }
       }
-      if (trace.key.empty()) {
-        continue;
-      }
-      trace.op = op;
-      op_count++;
-      if (op == READ && records_exist_map[trace.key] == false) {
-        record_list.emplace_back(trace.key);
-        prefill_value_size.emplace_back(trace.val_size);
-      }
-      records_exist_map[trace.key] = true;
-      trace_list.emplace_back(trace);
-      if(op == INSERT || op == UPDATE) {
-        transaction_value_size.emplace_back(trace.val_size);
-      }
-    } else {
-      std::cerr << "parse error: " << line << std::endl;
-    }
+      
+  } catch (const std::exception& e) {
+      std::cerr << "Error opening file: " << wl_fname << " - " << e.what() << std::endl;
+      return;
   }
-
-  file.close();
-
+  
   p.SetProperty(CoreWorkload::RECORD_COUNT_PROPERTY,
                 std::to_string(record_list.size()));
   p.SetProperty(CoreWorkload::OPERATION_COUNT_PROPERTY,
                 std::to_string(op_count));
-
+  
   prefill_val_size_generator_ =
       new RealTraceValueSizeGenerator(prefill_value_size);
   transaction_val_size_generator_ =

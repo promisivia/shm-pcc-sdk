@@ -107,9 +107,13 @@ void master_process(utils::Properties &props) {
   auto wl = build_workload(props);
   int total_ops = stoi(props[ycsbc::CoreWorkload::RECORD_COUNT_PROPERTY]);
 
+  auto begin = std::chrono::steady_clock::now();
   ycsbc::LoadManager load_manager(dbs, wl);
   load_manager.LoadData(SimThreadInfo::dispatcher_thread_count,
                         SimThreadInfo::worker_machine_count, total_ops);
+  auto end = std::chrono::steady_clock::now();
+  std::cerr << "LoadData time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
+  std::cerr << "LoadData throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ops/ms" << std::endl;
 
   auto machine_list =
       FollowerManager::split_machines(props.GetProperty("follower_list"));
