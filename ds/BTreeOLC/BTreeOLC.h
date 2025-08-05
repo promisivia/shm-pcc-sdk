@@ -36,7 +36,8 @@ struct OptLock {
 
 #if defined(NOCC_FLUSH_NODE) ||                                                \
     (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
-  virtual void flush() = 0;
+  virtual void flushNode() = 0;
+  virtual void invalidateNode() = 0;
 #endif
 
   bool isLocked(uint64_t version) { return ((version & 0b10) == 0b10); }
@@ -53,7 +54,7 @@ struct OptLock {
     (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     /* Flush the node if lock is acquired */
     if (!needRestart && needFlush)
-      flush();
+      invalidateNode();
 #endif
 
     return version;
@@ -61,6 +62,7 @@ struct OptLock {
 
   void writeLockOrRestart(bool &needRestart) {
     uint64_t version;
+    // write lock does not flush when acquiring lock, flush when updated
     version = readLockOrRestart(needRestart, false);
     if (needRestart)
       return;
@@ -71,7 +73,8 @@ struct OptLock {
 #if defined(NOCC_FLUSH_NODE) ||                                                \
     (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     else
-      flush();
+      // write lock is acquired, invalidate the node
+      invalidateNode();
 #endif
   }
 
@@ -90,7 +93,7 @@ struct OptLock {
     (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
     /* Only flush the node if node is modified */
     if (needFlush)
-      flush();
+      flushNode();
 #endif
     typeVersionLockObsolete.fetch_add(0b10);
   }
@@ -136,7 +139,9 @@ template <class Key, class Payload> struct BTreeLeaf : public BTreeLeafBase {
 
   bool isFull() { return count == maxEntries; };
 
-  void flush() { clwb(this, pageSize); }
+  void flushNode() { clwb(this, pageSize, true); }
+
+  void invalidateNode() { clflush(this, pageSize, true); }
 
   unsigned lowerBound(Key k) {
     unsigned lower = 0;
@@ -215,7 +220,9 @@ template <class Key> struct BTreeInner : public BTreeInnerBase {
 
   bool isFull() { return count == (maxEntries - 1); };
 
-  void flush() { clwb(this, sizeof(BTreeInner)); }
+  void flushNode() { clwb(this, sizeof(BTreeInner), true); }
+
+  void invalidateNode() { clflush(this, sizeof(BTreeInner), true); }
 
   unsigned lowerBoundBF(Key k) {
     auto base = keys;

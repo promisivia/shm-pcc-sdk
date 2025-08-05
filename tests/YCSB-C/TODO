@@ -1,0 +1,3 @@
+- 测试单线程的latency绝对值，insert和lookup（offload）
+- bwtree需要单元测试来证明split的时候没问题（如何构造？）
+- 需要在附录讨论linearizability（my）

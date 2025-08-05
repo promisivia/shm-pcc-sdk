@@ -119,9 +119,17 @@ static void dummy(const char *, ...) {}
 
 #ifdef BWTREE_DEBUG
 
+// #define bwt_printf(fmt, ...)                                          \
+//   do {                                                                \
+//     if (print_flag == false) break;                                   \
+//     fprintf(stderr, "%-24s(%8lX): " fmt, __FUNCTION__,                \
+//             std::hash<std::thread::id>()(std::this_thread::get_id()), \
+//             ##__VA_ARGS__);                                           \
+//     fflush(stdout);                                                   \
+//   } while (0);
+
 #define bwt_printf(fmt, ...)                                          \
   do {                                                                \
-    if (print_flag == false) break;                                   \
     fprintf(stderr, "%-24s(%8lX): " fmt, __FUNCTION__,                \
             std::hash<std::thread::id>()(std::this_thread::get_id()), \
             ##__VA_ARGS__);                                           \
@@ -3423,7 +3431,7 @@ private:
    * installation would always succeed
    */
   inline void InstallNewNode(NodeID node_id, const BaseNode *node_p) {
-      bwt_printf("node_id %lu, node_p %lu\n", node_id, node_p);
+      bwt_printf("node_id %lu, node_p %p\n", node_id, node_p);
 #ifdef NO_CC
 #ifndef NO_CC_WO_FLUSH_NODE
     node_p->FlushNode();

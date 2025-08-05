@@ -203,6 +203,10 @@ case $MODE in
 	SERVER_THREADS_N=144
 	run_ycsbc "workloadh_zipfian.spec" true
 	;;
+"test-small")
+	SERVER_THREADS_N=32
+	run_ycsbc "workloada_small.spec"
+	;;
 "test")
 	CLIENT_THREADS_N=48
 	thread_nums=(32)
@@ -287,6 +291,14 @@ case $MODE in
 		run_real $workload true
 		sleep 1
 	done
+	;;
+"read_latency_test")
+	SERVER_THREADS_N=1
+	run_ycsbc "workloadc_zipfian.spec"
+	;;
+"write_latency_test")
+	SERVER_THREADS_N=1
+	run_ycsbc "workloadh_zipfian.spec"
 	;;
 "server_thread_scale_test")
   type=$CONFIG_TYPE

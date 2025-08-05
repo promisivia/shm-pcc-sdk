@@ -31,7 +31,9 @@
 #include "utils/helper.h"
 #include "utils/sim_id.h"
 
+#ifdef LIMIT_ATOMIC
 #include "atomic.hpp"
+#endif
 
 void PrepareShmEnv(inicpp::IniManager &ini) {
   auto cacheable_ini = ini["shm/cacheable"];
@@ -175,7 +177,9 @@ void follower_process(utils::Properties &props) {
 }
 
 int main(const int argc, const char *argv[]) {
+#ifdef LIMIT_ATOMIC
   cxl_std::init_atomic_library(0, getpid());
+#endif
 
   InitStatistics();
   utils::Properties props;
@@ -218,4 +222,7 @@ int main(const int argc, const char *argv[]) {
   } else {
     follower_process(props);
   }
+#ifdef LIMIT_ATOMIC
+  cxl_std::exit_atomic_library();
+#endif
 }

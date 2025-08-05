@@ -13,7 +13,6 @@
 #include "shm/cxl_type.h"
 #include "utils/cpu_dist.h"
 #include "utils/sim_id.h"
-#include "atomic.hpp"
 
 namespace ycsbc {
 #ifdef INT_KEY_ADDR
