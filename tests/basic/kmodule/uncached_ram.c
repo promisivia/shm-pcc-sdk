@@ -192,7 +192,8 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   if (ret)
     return ret;
 
-  vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+  // vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+  vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
   ret = buffer_map_vma(&client->buffer, vma);
   if (ret)

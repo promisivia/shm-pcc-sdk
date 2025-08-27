@@ -55,7 +55,7 @@ CLevelHashDB::~CLevelHashDB() {
 
 int CLevelHashDB::ReadInternal(uint64_t key, uint64_t &value) {
 #ifdef LOCAL_NO_CC
-  auto ret = level->search(key);
+  auto ret = level->search(key, SimThreadInfo::worker_thread_id);
 #else
   auto map = pop.root()->cons;
   auto ret = map->search(persistent_map_type::key_type(key));

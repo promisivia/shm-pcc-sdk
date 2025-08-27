@@ -2,7 +2,7 @@
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
-db_types=("clht" "levelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
+db_types=("clht" "levelhash" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
 DB_TYPE="btree_olc"
 MODE="test"
 # DBG_LEVEL=1

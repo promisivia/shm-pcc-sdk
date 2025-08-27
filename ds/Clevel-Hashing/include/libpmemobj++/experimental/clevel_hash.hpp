@@ -322,6 +322,14 @@ class clevel_hash {
     expand_bucket = 0;
     expand_thread = std::thread(&clevel_hash::resize, this);
 
+#ifdef OPT_NO_META
+    // Initialize the meta_ptr_replicas.
+    meta_ptr_replicas.resize(thread_num);
+    for (size_t i = 0; i < thread_num; i++) {
+      meta_ptr_replicas[i] = meta.load();
+    }
+#endif
+
     KV_entry_ptr_u e = get_entry(meta->first_level, 0, 0);
     if (e.addr() != nullptr) {
       // never fires.
@@ -358,7 +366,7 @@ class clevel_hash {
                      size_type thread_id, size_type id);
 
   // mapped_type
-  ret search(const key_type &key) const;
+  ret search(const key_type &key, size_type thread_id) const;
 
   ret erase(const key_type &key, size_type thread_id);
 
@@ -438,6 +446,13 @@ class clevel_hash {
     tmp_meta.resize(thread_num);
     tmp_level.resize(thread_num);
     tmp_entry.resize(thread_num);
+
+#ifdef OPT_NO_META
+    meta_ptr_replicas.resize(thread_num);
+    for (size_t i = 0; i < thread_num; i++) {
+      meta_ptr_replicas[i] = meta.load();
+    }
+#endif
   }
 
   // Only for debug use!
@@ -474,6 +489,10 @@ class clevel_hash {
   std::vector<level_bucket *> tmp_level;
   std::vector<value_type *> tmp_entry;
 
+#ifdef OPT_NO_META
+  mutable std::vector<level_meta *> meta_ptr_replicas;
+#endif
+
   std::thread expand_thread;
 
 #ifdef CLEVEL_DOUBLE_READ_COUNT
@@ -490,12 +509,12 @@ template <typename Key, typename T, typename Hash, typename KeyEqual,
           size_t HashPower>
 typename clevel_hash<Key, T, Hash, KeyEqual, HashPower>::ret
 clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
-    const key_type &key) const {
+    const key_type &key, size_type thread_id) const {
   hv_type hv = hasher{}(key);
   partial_t partial = get_partial(hv);
 
 #ifdef OPT_NO_META
-  level_meta *m = meta.load(std::memory_order_seq_cst, false);
+  level_meta *m = meta_ptr_replicas[thread_id];
 #else
   level_meta *m = meta.load();
 #endif
@@ -532,6 +551,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 #ifdef OPT_NO_META
       if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
         m = meta.load();
+        meta_ptr_replicas[thread_id] = m;
         if (m->last_level != backup_last_level) {
           // If the last level has been deleted, go on to the next level.
           b |= 1;
@@ -1014,8 +1034,11 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
                              << ", key = " << key << std::endl;
     }
 #endif
-    // Assume we have limited area of cache coherence and we put meta in
     level_meta *m = meta.load();
+
+#ifdef OPT_NO_META
+    meta_ptr_replicas[thread_id] = m;
+#endif
 
     size_type n_levels;
     uint64_t level_num = 0;
@@ -1180,6 +1203,71 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
   difference_type expand_bucket_old;
   bool succ_update = false;
   level_meta *m_copy = meta.load();
+  
+#ifdef OPT_NO_META
+  // if is_resizing, should first help rehash + mark -1
+  if (m_copy->is_resizing) {
+    level_bucket *src_level = m_copy->last_level;
+    level_bucket *dst_level = m_copy->first_level;
+    difference_type bucket_idx = hv; // here hv acts as the source bucket index
+
+    if (src_level == nullptr || dst_level == nullptr) return false;
+    bucket &b = src_level->buckets[bucket_idx];
+    b.flush_no_fence();
+    mfence();
+
+    // move each slot in the bucket to new levels
+    for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
+      // check whether concurrent rehashing is happening
+      if (b.slots[0].p.load(std::memory_order_seq_cst, true) == -1)
+        // concurrent resize has succeeded and mark -1, no need to rehash
+        goto finish_help_resize;
+
+      KV_entry_ptr_u src_tmp = b.slots[slot_idx];
+      value_type *e = src_tmp.addr(false);
+      if (e == nullptr) continue;
+
+      difference_type f_idx, s_idx;
+      bool moved = false;
+      hv_type key_hv = hasher{}(e->first);
+      partial_t partial = get_partial(key_hv);
+      f_idx = first_index(key_hv, dst_level->capacity);
+      s_idx = second_index(partial, f_idx, dst_level->capacity);
+
+      bucket &dst_b1 = dst_level->buckets[f_idx];
+      bucket &dst_b2 = dst_level->buckets[s_idx];
+
+      for (size_type j = 0; j < assoc_num; j++) {
+        KV_entry_ptr_u dst_tmp = dst_b1.slots[j];
+        if (dst_tmp.addr(false) == nullptr) {
+          uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+          if (dst_b1.slots[j].p.compare_exchange_strong(
+                  expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+            b.slots[slot_idx].p.store(0);
+            moved = true;
+            break;
+          }
+        }
+
+        dst_tmp = dst_b2.slots[j];
+        if (dst_tmp.addr(false) == nullptr) {
+          uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+          if (dst_b2.slots[j].p.compare_exchange_strong(
+                  expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+            b.slots[slot_idx].p.store(0);
+            moved = true;
+            break;
+          }
+        }
+      }
+
+      // mark resize finished
+      b.slots[0].p.store(-1);
+    }
+  } // not resizing, directly update
+#endif
+
+finish_help_resize:
   while (true) {
     size_type n_levels;
     uint64_t level_num = 0;
@@ -1351,6 +1439,15 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
 
       bucket &b = bl->buckets[expand_bucket];
       b.flush_no_fence();
+      mfence();
+
+    #ifdef OPT_NO_META
+      // some other insert/update/delete already helps rehash this bucket
+      if (b.slots[0].p.load(std::memory_order_seq_cst, false) == -1) {
+        continue;
+      }
+    #endif
+
       for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
         KV_entry_ptr_u src_tmp = b.slots[slot_idx];
         value_type *e = b.slots[slot_idx].addr(false);
