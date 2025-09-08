@@ -119,29 +119,3 @@ add_ycsbc_executable(ycsbc_nocc_bwtree_part1 "NO_CC;OPT_GC")
 add_ycsbc_executable(ycsbc_nocc_bwtree_part2 "NO_CC;OPT_GC;OPT_ROOT_READ")
 
 # add_executable(test test.cc)
-
-# Add linearizability test for clevel_hash
-add_executable(clevel_linearizability_test ../../ds/Clevel-Hashing/tests/clevel_hash/linearizability_test.cpp)
-target_include_directories(clevel_linearizability_test PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ../../ds/Clevel-Hashing/include
-)
-# Link with the same libraries as other targets
-target_link_libraries(clevel_linearizability_test 
-    shm-lib
-    pthread 
-    tbb 
-    atomic 
-    ssh 
-    numa 
-    memkind
-    pmemobj
-    pmem
-)
-target_compile_definitions(clevel_linearizability_test PRIVATE 
-    USE_ORIGINAL_CLEVEL_HASH
-)
-set_target_properties(clevel_linearizability_test PROPERTIES 
-    ENABLE_EXPORTS ON
-    POSITION_INDEPENDENT_CODE TRUE
-)

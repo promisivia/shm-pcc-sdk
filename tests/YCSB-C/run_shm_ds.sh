@@ -331,9 +331,9 @@ case $MODE in
   type=$CONFIG_TYPE
   DB_TYPE="clevelhash"
     workloads=(
-	"workloada_zipfian.spec" 
-	# "workloadb_zipfian.spec" 
-	# "workloadc_zipfian.spec" 
+	"workloada_zipfian_1b.spec" 
+	"workloadb_zipfian_1b.spec" 
+	"workloadc_zipfian_1b.spec" 
 	# "workloadh_zipfian.spec"
 	)
 	# thread_nums=(48 )
