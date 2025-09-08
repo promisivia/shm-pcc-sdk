@@ -206,6 +206,20 @@ task_imbalance_multi_db() {
     done
 }
 
+# TODO: 1. radix_art_olc 编译有问题 2. clevelhash cc 会挂
+task_latency_overhead() {
+    dir=./log/latency_overhead
+    mkdir -p $dir
+    configs=("cc" "nocc")
+    db_types=("clht" "clevelhash" "bwtree" "btree_olc" "hot" "masstree" "radix_art_olc")
+    for config in "${configs[@]}"; do
+        for db_type in "${db_types[@]}"; do
+            ./build.sh "${config}"
+            ./run_shm_ds.sh -mode=latency_overhead -db=${db_type} 2>&1 | tee $dir/${config}_${db_type}.log
+        done
+    done
+}
+
 echo $PASSWORD | sudo -S ./prepare_env.sh
 
 # task_msg_queue
@@ -214,7 +228,7 @@ echo $PASSWORD | sudo -S ./prepare_env.sh
 # task_msg_queue
 # task_imbalance_multi_db
 # task_record_scale_test
-task_clevel_ccconfig_workload_threadcnt
+# task_clevel_ccconfig_workload_threadcnt
 # task_clevel_real_ccconfig_workload
 # task_ycsb_ccconfig_workload_threadcnt
 # task_real_ccconfig_workload
@@ -223,6 +237,6 @@ task_clevel_ccconfig_workload_threadcnt
 # task_sherman_ccconfig_workload_threadcnt
 # task_bwtree_breakdown
 # task_sherman_indivi
-# task_sherman_ccconfig_workload_threadcnt
+# task_latency_overhead
 
 echo $PASSWORD | sudo -S ./reset_env.sh
