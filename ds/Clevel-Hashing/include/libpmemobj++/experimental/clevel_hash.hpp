@@ -335,7 +335,7 @@ public:
 
     bucket_s(const bucket &ptr, 
 #ifdef NO_CC
-      bool nt = true,
+      bool nt = true
 #else
       bool nt = false
 #endif

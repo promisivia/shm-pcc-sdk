@@ -15,5 +15,5 @@
 #endif
 
 #ifdef INT_KEY_ADDR
-#define VALUE_ADDR_SIZE 4096
+#define VALUE_ADDR_SIZE 8
 #endif
