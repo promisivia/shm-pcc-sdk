@@ -321,7 +321,10 @@ public:
   }
 
   void free() {
-    delete load();
+    T *ptr = load();
+    if (ptr != nullptr) {
+      delete ptr;
+    }
     store(nullptr);
   }
 

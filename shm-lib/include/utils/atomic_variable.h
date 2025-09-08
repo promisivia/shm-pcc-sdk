@@ -263,7 +263,12 @@ public:
   operator T() const { return load(); }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
-         bool nt = true) const {
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) const {
     if (nt) {
 #ifdef STAT_NT_POINTER
       Statistic::atomic_load_counter++;
@@ -282,7 +287,12 @@ public:
   }
 
   void store(T newValue, std::memory_order __m = std::memory_order_seq_cst,
-             bool nt = true) {
+    #ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
 #ifdef SNIPER
     if (nt) {
       SimAccessCXLType2();
@@ -309,7 +319,13 @@ public:
 #endif
   }
 
-  T fetch_add(T i, bool nt = true) {
+  T fetch_add(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_fetch_add(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
@@ -319,7 +335,13 @@ public:
     return old_value;
   }
 
-  T fetch_sub(T i, bool nt = true) {
+  T fetch_sub(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_fetch_sub(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
@@ -329,7 +351,13 @@ public:
     return old_value;
   }
 
-  T fetch_xor(T i, bool nt = true) {
+  T fetch_xor(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_fetch_xor(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
@@ -342,7 +370,12 @@ public:
   bool
   compare_exchange_strong(T &expected, T desired,
                           std::memory_order __m = std::memory_order_seq_cst,
-                          bool nt = true) {
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
 #ifdef SNIPER
     std::cout << "Doing sniper cas" << std::endl;
     bool equal =
@@ -401,7 +434,12 @@ public:
   operator T() const { return load(); }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
-         bool nt = true) const {
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) const {
     if (nt) {
 #ifdef SNIPER
       SimAccessCXLType2();
@@ -417,7 +455,12 @@ public:
   }
 
   void store(T newValue, std::memory_order __m = std::memory_order_seq_cst,
-             bool nt = true) {
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
 #ifdef SNIPER
     if (nt) {
       SimAccessCXLType2();
@@ -434,7 +477,13 @@ public:
 #endif
   }
 
-  T fetch_add(T i, bool nt = true) {
+  T fetch_add(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_add_fetch(&value, i, __ATOMIC_SEQ_CST);
 #ifdef NO_CC_CAS_W_FLUSH
@@ -446,7 +495,13 @@ public:
     return old_value;
   }
 
-  T fetch_sub(T i, bool nt = true) {
+  T fetch_sub(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_fetch_sub(&value, i, __ATOMIC_SEQ_CST);
 #ifdef NO_CC_CAS_W_FLUSH
@@ -458,7 +513,13 @@ public:
     return old_value;
   }
 
-  T fetch_xor(T i, bool nt = true) {
+  T fetch_xor(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     T old_value;
     old_value = __atomic_fetch_xor(&value, i, __ATOMIC_SEQ_CST);
 #ifdef NO_CC_CAS_W_FLUSH
@@ -473,7 +534,12 @@ public:
   bool
   compare_exchange_strong(T &expected, T desired,
                           std::memory_order __m = std::memory_order_seq_cst,
-                          bool nt = true) {
+#ifdef NO_CC
+                          bool nt = true
+#else
+                          bool nt = false
+#endif
+    ) {
 #ifdef SNIPER
     bool equal =
         __atomic_compare_exchange_n(&value, &expected, desired, 0, (int)__m,
@@ -562,12 +628,22 @@ public:
   operator T() const { return load(); }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
-         bool nt = true) const {
+#ifdef NO_CC
+         bool nt = true
+#else
+         bool nt = false
+#endif
+    ) const {
     return *value;
   }
 
   void store(T newValue, std::memory_order __m = std::memory_order_seq_cst,
-             bool nt = true) {
+#ifdef NO_CC
+             bool nt = true
+#else
+             bool nt = false
+#endif
+    ) {
     uint8_t expected = 0;
     while (!__atomic_compare_exchange_n(&lock, &expected, 1, false,
                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
@@ -576,7 +652,13 @@ public:
     lock = 0;
   }
 
-  T fetch_add(T i, bool nt = true) {
+  T fetch_add(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     uint8_t expected = 0;
     while (!__atomic_compare_exchange_n(&lock, &expected, 1, false,
                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
@@ -587,7 +669,13 @@ public:
     return old_value;
   }
 
-  T fetch_sub(T i, bool nt = true) {
+  T fetch_sub(T i, 
+#ifdef NO_CC
+    bool nt = true
+#else
+    bool nt = false
+#endif
+    ) {
     uint8_t expected = 0;
     while (!__atomic_compare_exchange_n(&lock, &expected, 1, false,
                                         __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
@@ -601,7 +689,12 @@ public:
   bool
   compare_exchange_strong(T &expected, T desired,
                           std::memory_order __m = std::memory_order_seq_cst,
-                          bool nt = true) {
+#ifdef NO_CC
+                          bool nt = true
+#else
+                          bool nt = false
+#endif
+    ) {
     uint8_t lock_expected = 0;
     if (__atomic_compare_exchange_n(&lock, &lock_expected, 1, 0, (int)__m,
                                     (int)std::__cmpexch_failure_order(__m))) {
