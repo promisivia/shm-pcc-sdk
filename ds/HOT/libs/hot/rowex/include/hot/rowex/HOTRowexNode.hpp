@@ -71,16 +71,27 @@ template<typename DiscriminativeBitsRepresentation, typename PartialKeyType>  vo
 	assert(numberEntries >= 2);
 
 	void* memoryForNode = nullptr;
+#ifdef USE_CXL
+	memoryForNode = cacheable.malloc(allocationInformation.mTotalSizeInBytes);
+	if(memoryForNode == nullptr) {
+		throw std::bad_alloc();
+	}
+#else
 	uint error = posix_memalign(&memoryForNode, SIMD_COB_TRIE_NODE_ALIGNMENT, allocationInformation.mTotalSizeInBytes);
 	if(error != 0) {
 		//"Got error on alignment"
 		throw std::bad_alloc();
 	}
+#endif
 	return memoryForNode;
 };
 
 template<typename DiscriminativeBitsRepresentation, typename PartialKeyType> void HOTRowexNode<DiscriminativeBitsRepresentation, PartialKeyType>::operator delete (void * rawMemory) {
+#ifdef USE_CXL
+	cacheable.free(rawMemory);
+#else
 	free(rawMemory);
+#endif
 }
 
 template<typename DiscriminativeBitsRepresentation, typename PartialKeyType> inline hot::commons::NodeAllocationInformation HOTRowexNode<DiscriminativeBitsRepresentation, PartialKeyType>::getNodeAllocationInformation(uint16_t const numberEntries) {

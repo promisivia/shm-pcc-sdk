@@ -103,7 +103,11 @@ inline void Epoche::exitEpocheAndCleanup(ThreadInfo &epocheInfo) {
 
             if (cur->epoche < oldestEpoche) {
                 for (std::size_t i = 0; i < cur->nodesCount; ++i) {
+#ifdef USE_CXL
+                    cacheable.free(cur->nodes[i]);
+#else
                     free(cur->nodes[i]);
+#endif
                 }
                 deletionList.remove(cur, prev);
             } else {
@@ -130,7 +134,11 @@ inline Epoche::~Epoche() {
 
             assert(cur->epoche < oldestEpoche);
             for (std::size_t i = 0; i < cur->nodesCount; ++i) {
+#ifdef USE_CXL
+                cacheable.free(cur->nodes[i]);
+#else
                 free(cur->nodes[i]);
+#endif
             }
             d.remove(cur, prev);
             cur = next;

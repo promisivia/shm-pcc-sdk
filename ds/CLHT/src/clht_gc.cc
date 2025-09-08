@@ -32,6 +32,9 @@
 #include <assert.h>
 #include <malloc.h>
 
+#include "shm/mm.h"
+extern MemoryManager cacheable;
+
 static __thread ht_ts_t* clht_ts_thread = NULL;
 
 /* 
@@ -40,7 +43,11 @@ static __thread ht_ts_t* clht_ts_thread = NULL;
 void
 clht_gc_thread_init(clht_t* h, int id)
 {
+#ifdef USE_CXL
+  clht_alloc = (ssmem_allocator_t*) cacheable.malloc(sizeof(ssmem_allocator_t));
+#else
   clht_alloc = (ssmem_allocator_t*) malloc(sizeof(ssmem_allocator_t));
+#endif
   assert(clht_alloc != NULL);
   ssmem_alloc_init_fs_size(clht_alloc, SSMEM_DEFAULT_MEM_SIZE, SSMEM_GC_FREE_SET_SIZE, id);
 
@@ -227,13 +234,22 @@ clht_gc_free(clht_hashtable_t* hashtable)
 	{
 	  volatile bucket_t* cur = bucket;
 	  bucket = bucket->next;
+#ifdef USE_CXL
+	  cacheable.free((void*) cur);
+#else
 	  free((void*) cur);
+#endif
 	}
     }
 #endif
 
+#ifdef USE_CXL
+  cacheable.free(hashtable->table);
+  cacheable.free(hashtable);
+#else
   free(hashtable->table);
   free(hashtable);
+#endif
 
   return 1;
 }
@@ -247,11 +263,19 @@ clht_gc_destroy(clht_t* hashtable)
 #if !defined(CLHT_LINKED)
   clht_gc_collect_all(hashtable);
   clht_gc_free(hashtable->ht);
+#ifdef USE_CXL
+  cacheable.free(hashtable);
+#else
   free(hashtable);
+#endif
 #endif
 
   //  ssmem_alloc_term(clht_alloc);
+#ifdef USE_CXL
+  cacheable.free(clht_alloc);
+#else
   free(clht_alloc);
+#endif
 }
 
 /* 

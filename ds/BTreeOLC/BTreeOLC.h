@@ -192,7 +192,11 @@ template <class Key, class Payload> struct BTreeLeaf : public BTreeLeafBase {
   }
 
   BTreeLeaf *split(Key &sep) {
+#ifdef USE_CXL
+    BTreeLeaf *newLeaf = new (cacheable.malloc(sizeof(BTreeLeaf))) BTreeLeaf();
+#else
     BTreeLeaf *newLeaf = new BTreeLeaf();
+#endif
     newLeaf->count = count - (count / 2);
     count = count - newLeaf->count;
     memcpy(newLeaf->keys, keys + count, sizeof(Key) * newLeaf->count);
@@ -252,7 +256,11 @@ template <class Key> struct BTreeInner : public BTreeInnerBase {
   }
 
   BTreeInner *split(Key &sep) {
+#ifdef USE_CXL
+    BTreeInner *newInner = new (cacheable.malloc(sizeof(BTreeInner))) BTreeInner();
+#else
     BTreeInner *newInner = new BTreeInner();
+#endif
     newInner->count = count - (count / 2);
     count = count - newInner->count - 1;
     sep = keys[count];
@@ -290,14 +298,22 @@ template <class Key, class Value> struct BTree {
 #endif
 
   BTree() {
+#ifdef USE_CXL
+    root = new (cacheable.malloc(sizeof(BTreeLeaf<Key, Value>))) BTreeLeaf<Key, Value>();
+#else
     root = new BTreeLeaf<Key, Value>();
+#endif
 #ifdef COUNT_TOTAL_ATOMIC
     total_node_count.fetch_add(1);
 #endif
   }
 
   void makeRoot(Key k, NodeBase *leftChild, NodeBase *rightChild) {
+#ifdef USE_CXL
+    auto inner = new (cacheable.malloc(sizeof(BTreeInner<Key>))) BTreeInner<Key>();
+#else
     auto inner = new BTreeInner<Key>();
+#endif
 #ifdef COUNT_TOTAL_ATOMIC
     total_node_count.fetch_add(1);
 #endif

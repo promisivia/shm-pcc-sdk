@@ -56,7 +56,7 @@
 #include "ssmem.h"
 #include "utils.h"
 
-#define USE_MALLOC 0 		/* use malloc instead of ssmem */
+#define USE_MALLOC 1 		/* use malloc instead of ssmem */
 
 /* atomic swap u64 */
 #ifdef __sparc__
@@ -193,9 +193,12 @@ test(void* thread)
   seeds = seed_rand();
 
   /* printf("[%2d] starting:: %d allocs\n", ID, num_allocs); */
-
+#ifdef USE_CXL
+  ssmem_allocator_t* alloc = (ssmem_allocator_t*) cacheable.malloc(num_allocs * sizeof(ssmem_allocator_t));
+#else
   ssmem_allocator_t* alloc = (ssmem_allocator_t*) memalign(CACHE_LINE_SIZE, 
 							   num_allocs * sizeof(ssmem_allocator_t));
+#endif
   assert(alloc != NULL);
 
   int i;
@@ -217,7 +220,11 @@ test(void* thread)
 	  
 	  if (do_releases && (ops & 31) == 0)
 	    {
+#ifdef USE_CXL
+	      size_t* obj_rel = (size_t*) cacheable.malloc(sizeof(uintptr_t));
+#else
 	      size_t* obj_rel = (size_t*) malloc(sizeof(uintptr_t));
+#endif
 	      ssmem_release(alloc + b, (void*) obj_rel);
 	    }
 
@@ -238,7 +245,11 @@ test(void* thread)
 
 	  if (do_releases && (ops & 127) == 0)
 	    {
+#ifdef USE_CXL
+	      size_t* obj_rel = (size_t*) cacheable.malloc(sizeof(uintptr_t));
+#else
 	      size_t* obj_rel = (size_t*) malloc(sizeof(uintptr_t));
+#endif
 	      *obj_rel = *(size_t*) array_obj[spot];
 	      size_t* old_rel = (size_t*) SWAP_U64((uint64_t*) (array_obj + spot), (uint64_t) obj_rel);
 	      ssmem_release(alloc + a, (void*) old_rel);
@@ -265,7 +276,11 @@ test(void* thread)
 
 	  /* ----------------------------------------------------------------------------- */
 #if USE_MALLOC == 1
+#ifdef USE_CXL
+	  size_t* obj = (size_t*) cacheable.malloc(sizeof(uintptr_t));
+#else
 	  size_t* obj = (size_t*) malloc(sizeof(uintptr_t));
+#endif
 #else
 	  size_t* obj = (size_t*) ssmem_alloc(alloc + a, sizeof(uintptr_t));
 #endif
@@ -275,7 +290,11 @@ test(void* thread)
 	  size_t* old = (size_t*) SWAP_U64((uint64_t*) (array + spot), (uint64_t) obj);
 
 #if USE_MALLOC == 1
+#ifdef USE_CXL
+	  cacheable.free((void*) old);
+#else
 	  free((void*) old);
+#endif
 #else
 	  ssmem_free(alloc + a, (void*) old);
 #endif
@@ -408,20 +427,34 @@ main(int argc, char **argv)
     
   stop = 0;
     
-
+#ifdef USE_CXL
+  array = (uintptr_t*) cacheable.malloc(range * sizeof(uintptr_t));
+  assert(array != NULL);
+  array_obj = (uintptr_t*) cacheable.malloc(range * sizeof(uintptr_t));
+  assert(array_obj != NULL);
+#else
   array = (uintptr_t*) calloc(range, sizeof(uintptr_t));
   assert(array != NULL);
   array_obj = (uintptr_t*) calloc(range, sizeof(uintptr_t));
   assert(array_obj != NULL);
+#endif
 
   int j;
   for (j = 0; j < range; j++)
     {
+#ifdef USE_CXL
+      uintptr_t* obj = (uintptr_t*) cacheable.malloc(sizeof(uintptr_t));
+#else
       uintptr_t* obj = (uintptr_t*) malloc(sizeof(uintptr_t));
+#endif
       assert(obj != NULL);
       *obj = j;
       array[j] = (uintptr_t) obj;
+#ifdef USE_CXL
+      size_t* s = (size_t*) cacheable.malloc(sizeof(size_t));
+#else
       size_t* s = (size_t*) malloc(sizeof(size_t));
+#endif
       assert(s != NULL);
       *s = j;
       array_obj[j] = (uintptr_t) s;
@@ -444,7 +477,11 @@ main(int argc, char **argv)
   pthread_attr_init(&attr);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
+#ifdef USE_CXL
+  thread_data_t* tds = (thread_data_t*) cacheable.malloc(num_threads * sizeof(thread_data_t));
+#else
   thread_data_t* tds = (thread_data_t*) malloc(num_threads * sizeof(thread_data_t));
+#endif
 
   long t;
   for(t = 0; t < num_threads; t++)
@@ -481,14 +518,32 @@ main(int argc, char **argv)
 	}
     }
 
+#ifdef USE_CXL
+  cacheable.free(tds);
+#else
   free(tds);
+#endif
 
+#ifdef USE_CXL
+  cacheable.free(array);
+#else
   free(array);
+#endif
+
   for (j = 0; j < range; j++)
     {
+#ifdef USE_CXL
+      cacheable.free((void*) array_obj[j]);
+#else
       free((void*) array_obj[j]);
+#endif
     }
+#ifdef USE_CXL
+  cacheable.free(array_obj);
+#else
   free(array_obj);
+#endif
+
   double throughput = total_ops * 1000.0 / duration;
   printf("#throughput with %-4d threads: %10.0f = %.3f M\n", num_threads, throughput, throughput / 1.e6);
 

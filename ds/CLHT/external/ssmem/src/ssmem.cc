@@ -63,7 +63,11 @@ ssmem_gc_thread_init(ssmem_allocator_t* a, int id)
   a->ts = (ssmem_ts_t*) ssmem_ts_local;
   if (a->ts == NULL)
     {
+#ifdef USE_CXL
+      a->ts = (ssmem_ts_t*) cacheable.malloc(sizeof(ssmem_ts_t));
+#else
       a->ts = (ssmem_ts_t*) memalign(CACHE_LINE_SIZE, sizeof(ssmem_ts_t));
+#endif
       assert (a->ts != NULL);
       ssmem_ts_local = a->ts;
 
@@ -105,7 +109,11 @@ ssmem_alloc_init_fs_size(ssmem_allocator_t* a, size_t size, size_t free_set_size
   int ret = posix_memalign(&a->mem, CACHE_LINE_SIZE, size);
   assert(ret == 0);
 #else
+#ifdef USE_CXL
+  a->mem = (void*) cacheable.malloc(size);
+#else
   a->mem = (void*) memalign(CACHE_LINE_SIZE, size);
+#endif
 #endif
   assert(a->mem != NULL);
 #if SSMEM_ZERO_MEMORY == 1
@@ -153,7 +161,11 @@ static ssmem_list_t*
 ssmem_list_node_new(void* mem, ssmem_list_t* next)
 {
   ssmem_list_t* mc;
+#ifdef USE_CXL
+  mc = (ssmem_list_t*) cacheable.malloc(sizeof(ssmem_list_t));
+#else
   mc = (ssmem_list_t*) malloc(sizeof(ssmem_list_t));
+#endif
   assert(mc != NULL);
   mc->obj = mem;
   mc->next = next;
@@ -168,7 +180,11 @@ ssmem_released_t*
 ssmem_released_node_new(void* mem, ssmem_released_t* next)
 {
   ssmem_released_t* rel;
+#ifdef USE_CXL
+  rel = (ssmem_released_t*) cacheable.malloc(sizeof(ssmem_released_t) + (ssmem_ts_list_len * sizeof(size_t)));
+#else
   rel = (ssmem_released_t*) malloc(sizeof(ssmem_released_t) + (ssmem_ts_list_len * sizeof(size_t)));
+#endif
   assert(rel != NULL);
   rel->mem = mem;
   rel->next = next;
@@ -184,7 +200,11 @@ ssmem_free_set_t*
 ssmem_free_set_new(size_t size, ssmem_free_set_t* next)
 {
   /* allocate both the ssmem_free_set_t and the free_set with one call */
+#ifdef USE_CXL
+  ssmem_free_set_t* fs = (ssmem_free_set_t*) cacheable.malloc(sizeof(ssmem_free_set_t) + (size * sizeof(uintptr_t)));
+#else
   ssmem_free_set_t* fs = (ssmem_free_set_t*) memalign(CACHE_LINE_SIZE, sizeof(ssmem_free_set_t) + (size * sizeof(uintptr_t)));
+#endif
   assert(fs != NULL);
 
   fs->size = size;
@@ -230,8 +250,13 @@ ssmem_free_set_get_avail(ssmem_allocator_t* a, size_t size, ssmem_free_set_t* ne
 static void
 ssmem_free_set_free(ssmem_free_set_t* set)
 {
+#ifdef USE_CXL
+  cacheable.free(set->ts_set);
+  cacheable.free(set);
+#else
   free(set->ts_set);
   free(set);
+#endif
 }
 
 /* 
@@ -259,8 +284,13 @@ ssmem_alloc_term(ssmem_allocator_t* a)
   do
     {
       ssmem_list_t* mnxt = mcur->next;
+#ifdef USE_CXL
+      cacheable.free(mcur->obj);
+      cacheable.free(mcur);
+#else
       free(mcur->obj);
       free(mcur);
+#endif
       mcur = mnxt;
     }
   while (mcur != NULL);
@@ -288,7 +318,11 @@ ssmem_alloc_term(ssmem_allocator_t* a)
 
   if (--ssmem_num_allocators == 0)
     {
+#ifdef USE_CXL
+      cacheable.free(a->ts);
+#else
       free(a->ts);
+#endif
     }
 
 
@@ -327,8 +361,13 @@ ssmem_alloc_term(ssmem_allocator_t* a)
   while (rel != NULL)
     {
       ssmem_released_t* next = rel->next;
+#ifdef USE_CXL
+      cacheable.free(rel->mem);
+      cacheable.free(rel);
+#else
       free(rel->mem);
       free(rel);
+#endif
       rel = next;
     }
 
@@ -363,7 +402,11 @@ ssmem_ts_set_collect(size_t* ts_set)
 {
   if (ts_set == NULL)
     {
+#ifdef USE_CXL
+      ts_set = (size_t*) cacheable.malloc(ssmem_ts_list_len * sizeof(size_t));
+#else
       ts_set = (size_t*) malloc(ssmem_ts_list_len * sizeof(size_t));
+#endif
       assert(ts_set != NULL);
     }
 
@@ -462,7 +505,11 @@ ssmem_alloc(ssmem_allocator_t* a, size_t size)
 	  int ret = posix_memalign(&a->mem, CACHE_LINE_SIZE, a->mem_size);
 	  assert(ret == 0);
 #else
+#ifdef USE_CXL
+	  a->mem = (void*) cacheable.malloc(a->mem_size);
+#else
 	  a->mem = (void*) memalign(CACHE_LINE_SIZE, a->mem_size);
+#endif
 #endif
 	  assert(a->mem != NULL);
 #if SSMEM_ZERO_MEMORY == 1
@@ -542,8 +589,13 @@ ssmem_mem_reclaim(ssmem_allocator_t* a)
 	  do
 	    {
 	      rel_cur = rel_nxt;
+#ifdef USE_CXL
+	      cacheable.free(rel_cur->mem);
+	      cacheable.free(rel_cur);
+#else
 	      free(rel_cur->mem);
 	      free(rel_cur);
+#endif
 	      rel_nxt = rel_nxt->next;
 	    }
 	  while (rel_nxt != NULL);

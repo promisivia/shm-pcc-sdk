@@ -6,8 +6,12 @@
 #include <bitset>
 #include <cassert>
 #include <cstdint>
+#include <map>
+#include <iostream>
 
 #include <hot/commons/Algorithms.hpp>
+#include "utils/config.h"
+#include "utils/bypass_cache.h"
 
 namespace hot { namespace commons {
 
@@ -248,12 +252,23 @@ template<typename PartialKeyType> void* SparsePartialKeys<PartialKeyType>::opera
 	constexpr size_t paddingElements = (32 - 8)/sizeof(PartialKeyType);
 	size_t estimatedNumberElements = estimateSize(numberEntries)/sizeof(PartialKeyType);
 
-
+#ifdef USE_CXL
+	void* mem = cacheable.malloc((estimatedNumberElements + paddingElements) * sizeof(PartialKeyType));
+	if(mem == nullptr) {
+		throw std::bad_alloc();
+	}
+	return mem;
+#else
 	return new PartialKeyType[estimatedNumberElements + paddingElements];
+#endif
 };
 template<typename PartialKeyType> void SparsePartialKeys<PartialKeyType>::operator delete (void * rawMemory) {
+#ifdef USE_CXL
+	cacheable.free(rawMemory);
+#else
 	PartialKeyType* masks = reinterpret_cast<PartialKeyType*>(rawMemory);
 	delete [] masks;
+#endif
 }
 
 template<>
