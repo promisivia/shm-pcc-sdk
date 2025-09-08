@@ -109,7 +109,7 @@ inline void Epoche::exitEpocheAndCleanup(ThreadInfo &epocheInfo) {
                 for (std::size_t i = 0; i < cur->nodesCount; ++i) {
                     /* FIXME(FN): Can not detect which class it is using */
                 #ifdef USE_CXL
-                    cacheable.free(memkind_pool, cur->nodes[i]);
+                    cacheable.free(cur->nodes[i]);
                 #else
                     operator delete(cur->nodes[i]);
                 #endif
@@ -140,7 +140,7 @@ inline Epoche::~Epoche() {
             assert(cur->epoche < oldestEpoche);
             for (std::size_t i = 0; i < cur->nodesCount; ++i) { 
             #ifdef USE_CXL
-                cacheable.free(memkind_pool, cur->nodes[i]);
+                cacheable.free(cur->nodes[i]);
             #else
                 operator delete(cur->nodes[i]);
             #endif

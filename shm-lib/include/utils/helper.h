@@ -8,13 +8,13 @@
 #define NEW_CLASS_ON_SHM                                                       \
   void *operator new(size_t size) {                                            \
     void *ptr;                                                                 \
-    if (cacheable.clalign(memkind_pool, &ptr, size) != 0) {                    \
+    if (cacheable.clalign(&ptr, size) != 0) {                                  \
       throw std::bad_alloc();                                                  \
     }                                                                          \
     return ptr;                                                                \
   }                                                                            \
                                                                                \
-  void operator delete(void *ptr) noexcept { memkind_free(memkind_pool, ptr); }
+  void operator delete(void *ptr) noexcept { cacheable.free(ptr); }
 
 #else // Do nothing
 

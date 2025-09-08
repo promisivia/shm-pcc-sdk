@@ -11,7 +11,7 @@
 
 #include <iostream>
 
-#include "../../src/RadixART/OptimisticLockCoupling/Tree.h"
+#include "../../../ds/RadixART/OptimisticLockCoupling/Tree.h"
 #include "core/db.h"
 #include "db/utils.h"
 

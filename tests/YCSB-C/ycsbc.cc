@@ -141,6 +141,8 @@ void master_process(utils::Properties &props) {
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
             << "throughput\t" << (sum / duration / 1000000) << '\n'
             << "total operations\t" << sum << '\n';
+  // TimerAverage::Print("read_latency", std::cerr);
+  // TimerAverage::Print("update_latency", std::cerr);
 
   PrintStatistics();
 
