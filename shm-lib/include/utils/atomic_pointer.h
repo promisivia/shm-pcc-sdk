@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstddef>
+#include <type_traits>
 #include <cstring>
 #include <vector>
 #include "shm/mm.h"
@@ -321,10 +322,7 @@ public:
   }
 
   void free() {
-    T *ptr = load();
-    if (ptr != nullptr) {
-      delete ptr;
-    }
+    // delete load();
     store(nullptr);
   }
 
@@ -432,17 +430,20 @@ public:
                                     (int)std::__cmpexch_failure_order(__m));
     if (equal && nt) {
       clwb((void *)&ptr, sizeof(T *));
-      // clwb((void *)ptr, sizeof(T));
     }
     return equal;
   }
 
   void free() {
-    for (size_t i = 0; i < size; i++) {
-      ptr[i].~T(); // 显式调用析构函数
-    }
+    T* p = load();
+    if (!p) return;
     if (size != 0) {
-      ::free(ptr); // 释放内存
+      if constexpr (!std::is_trivially_destructible_v<T>) {
+        for (size_t i = 0; i < size; ++i) {
+          p[i].~T();
+        }
+      }
+      cacheable.free(p);  // 与 cacheable.malloc 匹配
     }
     store(nullptr);
     size = 0;

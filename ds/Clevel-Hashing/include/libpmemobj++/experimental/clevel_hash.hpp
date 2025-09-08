@@ -333,7 +333,13 @@ public:
   struct bucket_s {
     KV_entry_ptr_s slots[assoc_num];
 
-    bucket_s(const bucket &ptr, bool nt = true) {
+    bucket_s(const bucket &ptr, 
+#ifdef NO_CC
+      bool nt = true,
+#else
+      bool nt = false
+#endif
+    ) {
       if (nt) {
         ptr.flush_no_fence();
         mfence();
@@ -346,8 +352,7 @@ public:
     nt_pointer<bucket[]> buckets;
     atomic_type<uint64_t> capacity;
     level_ptr_t up;
-
-    void clear() { buckets.free(); }
+    void clear() { /* TODO: deferred free after rehash everything */ }
   };
 
   struct level_meta {

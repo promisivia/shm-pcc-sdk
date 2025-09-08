@@ -114,8 +114,8 @@ void master_process(utils::Properties &props) {
   auto end = std::chrono::steady_clock::now();
   std::cerr << "LoadData time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
   std::cerr << "LoadData throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ops/ms" << std::endl;
-
-  auto machine_list =
+  
+  auto machine_list =stoi(props.GetProperty("machinenum", "1")) == 1 ? std::vector<std::string>() :
       FollowerManager::split_machines(props.GetProperty("follower_list"));
   assert(machine_list.size() == SimThreadInfo::worker_machine_count - 1);
 
