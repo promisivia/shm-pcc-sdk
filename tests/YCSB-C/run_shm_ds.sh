@@ -2,7 +2,7 @@
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
-db_types=("clht" "levelhash" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
+db_types=("clht" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
 DB_TYPE="btree_olc"
 MODE="test"
 # DBG_LEVEL=1
@@ -294,11 +294,15 @@ case $MODE in
 	;;
 "read_latency_test")
 	SERVER_THREADS_N=1
-	run_ycsbc "workloadc_zipfian.spec"
+	run_real "workloadc_zipfian.spec"
 	;;
 "write_latency_test")
 	SERVER_THREADS_N=1
-	run_ycsbc "workloadh_zipfian.spec"
+	run_real "workloadh_zipfian.spec"
+	;;
+"latency_overhead")
+	SERVER_THREADS_N=1
+	run_ycsbc "workloada_zipfian.spec"
 	;;
 "server_thread_scale_test")
   type=$CONFIG_TYPE

@@ -2,6 +2,12 @@
 #include "Epoche.cpp"
 
 #include <memory>
+#include <random>
+#include "tbb/tbb.h"
+#ifdef USE_CXL
+#include "utils/config.h"
+#include "utils/bypass_cache.h"
+#endif
 
 using namespace MASS;
 
@@ -113,17 +119,29 @@ leafnode::leafnode(void *left, uint64_t key, void *right, uint32_t level = 1) : 
 
 void *leafnode::operator new(size_t size) {
     void *ptr;
+#ifdef USE_CXL
+    ptr = cacheable.malloc(size);
+    if (ptr == NULL) {
+        printf("%s Allocation error by cacheable.malloc\n", __func__);
+        exit(1);
+    }
+#else
     int ret = posix_memalign(&ptr, CACHE_LINE_SIZE, size);
     if (ret != 0) {
         printf("%s Allocation error by posix_memalign\n", __func__);
         exit(ret);
     }
+#endif
     memset(ptr, 0, size);
     return ptr;
 }
 
 void leafnode::operator delete(void *addr) {
+#ifdef USE_CXL
+    cacheable.free(addr);
+#else
     free(addr);
+#endif
 }
 
 bool leafnode::isLocked(uint64_t version) const {
@@ -271,11 +289,19 @@ leafvalue *masstree::make_leaf(char *key, size_t key_len, uint64_t value)
     void *aligned_alloc;
     size_t len = (key_len % sizeof(uint64_t)) == 0 ? key_len : (((key_len) / sizeof(uint64_t)) + 1) * sizeof(uint64_t);
 
+#ifdef USE_CXL
+    aligned_alloc = cacheable.malloc(sizeof(leafvalue) + len + sizeof(uint64_t));
+    if (aligned_alloc == NULL) {
+        printf("%s Allocation error by cacheable.malloc\n", __func__);
+        exit(1);
+    }
+#else
     int ret = posix_memalign(&aligned_alloc, CACHE_LINE_SIZE, sizeof(leafvalue) + len + sizeof(uint64_t));
     if (ret != 0) {
         printf("%s Allocation error by posix_memalign\n", __func__);
         exit(ret);
     }
+#endif
 
     leafvalue *lv = reinterpret_cast<leafvalue *> (aligned_alloc);
     memset(lv, 0, sizeof(leafvalue) + len + sizeof(uint64_t));
@@ -297,11 +323,19 @@ leafvalue *leafnode::smallest_leaf(size_t key_len, uint64_t value)
     void *aligned_alloc;
     size_t len = (key_len % sizeof(uint64_t)) == 0 ? key_len : (((key_len) / sizeof(uint64_t)) + 1) * sizeof(uint64_t);
 
+#ifdef USE_CXL
+    aligned_alloc = cacheable.malloc(sizeof(leafvalue) + len);
+    if (aligned_alloc == NULL) {
+        printf("%s Allocation error by cacheable.malloc\n", __func__);
+        exit(1);
+    }
+#else
     int ret = posix_memalign(&aligned_alloc, CACHE_LINE_SIZE, sizeof(leafvalue) + len);
     if (ret != 0) {
         printf("%s Allocation error by posix_memalign\n", __func__);
         exit(ret);
     }
+#endif
 
     leafvalue *lv = reinterpret_cast<leafvalue *> (aligned_alloc);
     memset(lv, 0, sizeof(leafvalue) + len);
@@ -745,7 +779,13 @@ void masstree::del(char *key, ThreadInfo &threadEpocheInfo)
     leafnode *next = NULL;
     void *snapshot_v = NULL;
 
-    auto customDeleter = [](leafvalue *lv) { free(lv); };
+    auto customDeleter = [](leafvalue *lv) {
+#ifdef USE_CXL
+        cacheable.free(lv);
+#else
+        free(lv);
+#endif
+    };
     std::unique_ptr<leafvalue, decltype(customDeleter)> lv(make_leaf(key, strlen(key), 0), customDeleter);
 
     int needRestart;
@@ -1800,7 +1840,13 @@ void *masstree::get(char *key, ThreadInfo &threadEpocheInfo)
     int needRestart;
     uint64_t v;
 
-    auto customDeleter = [](leafvalue *lv) { free(lv); };
+    auto customDeleter = [](leafvalue *lv) {
+#ifdef USE_CXL
+        cacheable.free(lv);
+#else
+        free(lv);
+#endif
+    };
     std::unique_ptr<leafvalue, decltype(customDeleter)> lv(make_leaf(key, strlen(key), 0), customDeleter);
 
 restart:
@@ -1997,7 +2043,11 @@ leaf_retry:
                     p = reinterpret_cast<leafnode *> (snapshot_v);
                     leafvalue *smallest = p->smallest_leaf(lv->key_len, lv->value);
                     p->get_range(smallest, num, count, buf, p, depth + 1);
+#ifdef USE_CXL
+                    cacheable.free(smallest);
+#else
                     free(smallest);
+#endif
                 } else if (l->key(perm[i]) == lv->fkey[depth]) {
                     p = reinterpret_cast<leafnode *> (snapshot_v);
                     p->get_range(lv, num, count, buf, p, depth + 1);
@@ -2106,7 +2156,11 @@ leaf_retry:
                     p = reinterpret_cast<leafnode *> (snapshot_v);
                     leafvalue *smallest = p->smallest_leaf(lv->key_len, lv->value);
                     p->get_range(smallest, num, count, buf, p, depth + 1);
+#ifdef USE_CXL
+                    cacheable.free(smallest);
+#else
                     free(smallest);
+#endif
                 } else if (l->key(perm[i]) == lv->fkey[depth]) {
                     p = reinterpret_cast<leafnode *> (snapshot_v);
                     p->get_range(lv, num, count, buf, p, depth + 1);

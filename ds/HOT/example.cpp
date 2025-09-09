@@ -2,6 +2,10 @@
 #include <chrono>
 #include <random>
 #include "tbb/tbb.h"
+#ifdef USE_CXL
+#include "utils/config.h"
+#include "utils/bypass_cache.h"
+#endif
 
 using namespace std;
 
@@ -47,7 +51,12 @@ void run(char **argv) {
         tbb::parallel_for(tbb::blocked_range<uint64_t>(0, n), [&](const tbb::blocked_range<uint64_t> &range) {
             for (uint64_t i = range.begin(); i != range.end(); i++) {
                 IntKeyVal *key;
+#ifdef USE_CXL
+                key = reinterpret_cast<IntKeyVal*>(cacheable.malloc(sizeof(IntKeyVal)));
+                if (!key) { fprintf(stderr, "cacheable.malloc failed\n"); exit(1); }
+#else
                 posix_memalign((void **)&key, 64, sizeof(IntKeyVal));
+#endif
                 key->key = keys[i];
                 key->value = keys[i];
                 if (!(mTrie.insert(key))) {

@@ -38,6 +38,8 @@
 #include <emmintrin.h>
 
 #include "clht_lb_res.h"
+#include "shm/mm.h"
+extern MemoryManager cacheable;
 
 //#define CLHTDEBUG
 //#define CRASH_AFTER_SWAP_CLHT
@@ -185,7 +187,11 @@ static inline void movnt64(uint64_t *dest, uint64_t const src, bool front, bool 
 clht_bucket_create() 
 {
     bucket_t* bucket = NULL;
+#ifdef USE_CXL
+    bucket = (bucket_t *) cacheable.malloc(sizeof(bucket_t));
+#else
     bucket = (bucket_t *) memalign(CACHE_LINE_SIZE, sizeof(bucket_t));
+#endif
     if (bucket == NULL)
     {
         return NULL;
@@ -221,7 +227,11 @@ clht_hashtable_t* clht_hashtable_create(uint64_t num_buckets);
     clht_t* 
 clht_create(uint64_t num_buckets)
 {
+#ifdef USE_CXL
+    clht_t* w = (clht_t*) cacheable.malloc(sizeof(clht_t));
+#else
     clht_t* w = (clht_t*) memalign(CACHE_LINE_SIZE, sizeof(clht_t));
+#endif
     if (w == NULL)
     {
         printf("** malloc @ hatshtalbe\n");
@@ -231,7 +241,11 @@ clht_create(uint64_t num_buckets)
     w->ht = clht_hashtable_create(num_buckets);
     if (w->ht == NULL)
     {
+#ifdef USE_CXL
+        cacheable.free(w);
+#else
         free(w);
+#endif
         return NULL;
     }
     rlock_st((rlock_t *)&(w->resize_lock), LOCK_FREE);
@@ -265,7 +279,11 @@ clht_hashtable_create(uint64_t num_buckets)
     }
 
     /* Allocate the table itself. */
+#ifdef USE_CXL
+    hashtable = (clht_hashtable_t*) cacheable.malloc(sizeof(clht_hashtable_t));
+#else
     hashtable = (clht_hashtable_t*) memalign(CACHE_LINE_SIZE, sizeof(clht_hashtable_t));
+#endif
     if (hashtable == NULL)
     {
         printf("** malloc @ hatshtalbe\n");
@@ -273,11 +291,19 @@ clht_hashtable_create(uint64_t num_buckets)
     }
 
     /* hashtable->table = calloc(num_buckets, (sizeof(bucket_t))); */
+#ifdef USE_CXL
+    hashtable->table = (bucket_t*) cacheable.malloc(num_buckets * (sizeof(bucket_t)));
+#else
     hashtable->table = (bucket_t*) memalign(CACHE_LINE_SIZE, num_buckets * (sizeof(bucket_t)));
+#endif
     if (hashtable->table == NULL) 
     {
         printf("** alloc: hashtable->table\n"); fflush(stdout);
+#ifdef USE_CXL
+        cacheable.free(hashtable);
+#else
         free(hashtable);
+#endif
         return NULL;
     }
 

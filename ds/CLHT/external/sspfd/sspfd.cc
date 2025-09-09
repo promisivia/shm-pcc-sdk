@@ -41,15 +41,23 @@ sspfd_store_init(size_t num_stores, size_t num_entries, size_t id)
 {
   SSPFD_ID = id;
   sspfd_num_stores = num_stores;
-
+#ifdef USE_CXL
+  _sspfd_s = (volatile ticks*) cacheable.malloc(num_stores * sizeof(ticks));
+  sspfd_store = (volatile ticks**) cacheable.malloc(num_stores * sizeof(ticks*));
+#else
   _sspfd_s = (volatile ticks*) malloc(num_stores * sizeof(ticks));
   sspfd_store = (volatile ticks**) malloc(num_stores * sizeof(ticks*));
+#endif
   assert(_sspfd_s != NULL && sspfd_store != NULL);
 
   volatile uint32_t i;
   for (i = 0; i < num_stores; i++)
     {
+#ifdef USE_CXL
+      sspfd_store[i] = (ticks*) cacheable.malloc(num_entries * sizeof(ticks));
+#else
       sspfd_store[i] = (ticks*) malloc(num_entries * sizeof(ticks));
+#endif
       assert(sspfd_store[i] != NULL);
       PREFETCHW((void*) &sspfd_store[i][0]);
     }
@@ -113,11 +121,20 @@ sspfd_store_term()
   volatile uint32_t i;
   for (i = 0; i < sspfd_num_stores; i++)
     {
+#ifdef USE_CXL
+      cacheable.free((void*) sspfd_store[i]);
+#else
       free((void*) sspfd_store[i]);
+#endif
     }
 
+#ifdef USE_CXL
+  cacheable.free((void*) _sspfd_s);
+  cacheable.free(sspfd_store);
+#else
   free((void*) _sspfd_s);
   free(sspfd_store);
+#endif
 }
 
 inline void
