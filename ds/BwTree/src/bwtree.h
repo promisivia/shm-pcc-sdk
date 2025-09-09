@@ -54,6 +54,12 @@
  */
 #define BWTREE_NODEBUG
 
+/*
+ * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
+ * 默认关闭，如需开启请在编译命令或此处取消注释
+ */
+#define BWTREE_AUTODUMP
+
 #ifdef BWTREE_PELOTON
 
 #include "backend/index/index.h"
@@ -66,6 +72,16 @@ using NodeID = uint64_t;
 #include "atomic_stack.h"
 #include "bloom_filter.h"
 #include "sorted_small_set.h"
+#ifdef BWTREE_AUTODUMP
+// #undef BWTREE_NODEBUG
+#include <mutex>
+#include <fstream>
+#include <map>
+#include <fstream>
+#include <set>
+#include <iostream>
+#include <string>
+#endif
 
 // Copied from Linux kernel code to facilitate branch prediction unit on CPU
 // if there is one
@@ -112,6 +128,8 @@ namespace index {
 #else
 namespace wangziqi2013 {
 namespace bwtree {
+#ifdef BWTREE_AUTODUMP
+extern const char* g_bwtree_auto_dump_path;
 #endif
 
 // This needs to be always here
@@ -3365,6 +3383,8 @@ private:
     assert(node_id != INVALID_NODE_ID);
     assert(node_id < MAPPING_TABLE_SIZE);
 
+    bool ret = false;
+
 // If idb is activated, then all operation will be blocked before
 // they could call CAS and change the key
 #ifdef INTERACTIVE_DEBUG
@@ -3378,7 +3398,7 @@ private:
 #endif
 
 #ifdef OPT_ROOT_READ
-    bool ret = mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
+    ret = mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
     if (!ret) {
       return ret;
     }
@@ -3390,8 +3410,21 @@ private:
     }
     return ret;
 #else
-    return mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
+    ret = mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
 #endif
+
+    // 自动导出树结构：仅在CAS成功时输出
+// #ifdef BWTREE_AUTODUMP
+//   static std::mutex dump_mutex;
+//   std::lock_guard<std::mutex> lk(dump_mutex);
+//   std::ofstream ofs(g_bwtree_auto_dump_path, std::ios::app);
+//   if (ofs.good()) {
+//     ofs << "\n[AutoDump] After Install NodeId=" << node_id << "\n";
+//     PrintTreeStructure(ofs);
+//   }
+// #endif
+
+    return ret;
   }
 
   /*
@@ -3403,6 +3436,7 @@ private:
   inline bool InstallRootNode(NodeID old_root_node_id,
                               NodeID new_root_node_id) {
     // printf("InstallRootNode: old_id %lu, new_id %lu\n", old_root_node_id, new_root_node_id);
+    bool ret = false;
 #ifdef OPT_ROOT_READ
     if (!global_root_id.compare_exchange_strong(old_root_node_id, new_root_node_id)) {
       // printf("Root ID is installed by other, catch up root node\n");
@@ -3420,8 +3454,22 @@ private:
     }
     return true;
 #else
-    return root_id.compare_exchange_strong(old_root_node_id, new_root_node_id);
+    ret = root_id.compare_exchange_strong(old_root_node_id, new_root_node_id);
 #endif
+
+#ifdef BWTREE_AUTODUMP
+    {
+      static std::mutex dump_mutex;
+      std::lock_guard<std::mutex> lk(dump_mutex);
+      std::ofstream ofs(g_bwtree_auto_dump_path ? g_bwtree_auto_dump_path : "bwtree_dump.txt", std::ios::app);
+      if (ofs.good()) {
+        ofs << "\n[AutoDump] After InstallRootNode old=" << old_root_node_id << ", new=" << new_root_node_id << "\n";
+        PrintTreeStatistics(ofs);
+      }
+    }
+#endif
+
+    return ret;
   }
 
   /*
@@ -3444,6 +3492,24 @@ private:
     mapping_table[node_id] = node_p;
 #endif
 
+// #ifdef BWTREE_AUTODUMP
+//     static std::mutex dump_mutex;
+//     std::lock_guard<std::mutex> lk(dump_mutex);
+    
+//     // 如果是第一个节点，删除之前的dump文件
+//     static bool first_node = true;
+//     if (first_node) {
+//       std::remove(g_bwtree_auto_dump_path);
+//       first_node = false;
+//     }
+    
+//     std::ofstream ofs(g_bwtree_auto_dump_path, std::ios::app);
+//     if (ofs.good()) {
+//       ofs << "\n[AutoDump] After Install NodeId=" << node_id << "\n";
+//       PrintTreeStructure(ofs);
+//     }
+// #endif
+
     return;
   }
 
@@ -3465,7 +3531,6 @@ private:
     assert(node_id < MAPPING_TABLE_SIZE);
 
 #ifdef OPT_ROOT_READ
-    // TODO: Check why it conflicts with OPT_IN_USE_FLAG
     if (node_id == GetRootID(true)){
       return (const BaseNode *)GetRootPtr(false);
     }
@@ -9971,9 +10036,510 @@ retry_read:
     return;
   }
 
+#ifdef BWTREE_AUTODUMP
+  /*
+   * PrintTreeStructure() - 遍历整个BwTree并输出树结构
+   * 
+   * 这个函数会从根节点开始递归遍历，保持树的层次关系
+   * 输出一个可视化的树结构，包括节点类型、键值范围、深度等信息
+   * 
+   * 参数:
+   *   os: 输出流，默认为stdout
+   *   show_deltas: 是否显示delta链信息，默认为true
+   *   max_depth: 最大显示深度，默认为-1（无限制）
+   */
+  void PrintTreeStructure(std::ostream& os = std::cout, bool show_deltas = true, int max_depth = -1) {
+    // 将所有形状打印重定向到统一文件
+    std::ofstream __bt_out("bwtree_dump.txt", std::ios::app);
+    std::streambuf* __old_buf = nullptr;
+    if (__bt_out.good()) {
+      __old_buf = os.rdbuf(__bt_out.rdbuf());
+    }
+
+    os << "\n=== BwTree Structure Visualization ===\n";
+    os << "Root Node ID: " << GetRootID() << "\n";
+    os << "Total Allocated IDs: " << next_unused_node_id.load() - 1 << "\n\n";
+    
+    NodeID _root_id_ = GetRootID();
+    if (_root_id_ == INVALID_NODE_ID) {
+      os << "Tree is empty (no root node)\n";
+      return;
+    }
+    
+    // 从根节点开始递归打印，保持层次关系
+    PrintNodeRecursive(_root_id_, os, show_deltas, max_depth, 0);
+    
+    os << "\n=== End of Tree Structure ===\n";
+
+    if (__old_buf != nullptr) {
+      os.rdbuf(__old_buf);
+    }
+  }
+  
+  /*
+   * PrintNodeRecursive() - 递归打印单个节点及其子树
+   * 
+   * 私有辅助函数，用于递归遍历和打印节点
+   */
+  void PrintNodeRecursive(NodeID node_id, std::ostream& os, 
+                         bool show_deltas, int max_depth, 
+                         int current_depth) {
+    if (max_depth >= 0 && current_depth >= max_depth) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Max depth reached]\n";
+      return;
+    }
+    
+    if (node_id == INVALID_NODE_ID) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Invalid Node]\n";
+      return;
+    }
+    
+    // 获取节点
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Node " << node_id << " not found]\n";
+      return;
+    }
+    
+    // 打印节点信息，使用树形符号显示层次关系
+    std::string prefix = std::string(current_depth * 2, ' ');
+    std::string node_prefix;
+    
+    if (current_depth == 0) {
+      node_prefix = "Root ";
+    } else if (current_depth == 1) {
+      node_prefix = "├─ ";
+    } else {
+      node_prefix = "│  " + std::string((current_depth - 1) * 2, ' ') + "├─ ";
+    }
+    
+    os << prefix << node_prefix << "Node " << node_id << " (" << GetNodeTypeString(node_p->GetType()) << ")\n";
+    
+    // 打印节点详细信息
+    PrintNodeDetails(node_p, os, show_deltas, current_depth + 1);
+    
+    // 如果是内部节点，递归打印子节点
+    if (node_p->IsInnerNode()) {
+      PrintInnerNodeChildren(node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 如果是delta节点，检查是否有子节点需要遍历
+    if (node_p->IsDeltaNode()) {
+      PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+    
+    // 检查是否有右兄弟节点（通过GetNextNodeID）
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != node_id) {
+      os << std::string(current_depth * 2, ' ') << "  Right Sibling:\n";
+      PrintNodeRecursive(next_id, os, show_deltas, max_depth, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintNodeDetails() - 打印节点的详细信息
+   */
+  void PrintNodeDetails(const BaseNode* node_p, std::ostream& os, 
+                       bool show_deltas, int current_depth) {
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 节点信息放在一行输出
+    os << prefix << "  Type: " << GetNodeTypeString(node_p->GetType()) 
+       << ", Depth: " << node_p->GetDepth() 
+       << ", Item Count: " << node_p->GetItemCount();
+    
+    // 键范围
+    const auto& low_key_pair = node_p->GetLowKeyPair();
+    const auto& high_key_pair = node_p->GetHighKeyPair();
+    os << ", Low Key: " << low_key_pair.first 
+       << ", High Key: " << high_key_pair.first;
+    
+    // 如果是内部节点，显示子节点数量
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      int child_count = 0;
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        if (it->second != INVALID_NODE_ID) child_count++;
+      }
+      os << ", Child Count: " << child_count;
+    }
+    
+    os << "\n";
+    
+    // Delta链信息（如果启用了delta显示）- 集成到节点内部
+    if (show_deltas && node_p->IsDeltaNode()) {
+      os << prefix << "  Delta Chain Info:\n";
+      // 不在这里调用PrintDeltaChain，避免重复
+      // PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintInnerNodeChildren() - 打印内部节点的子节点
+   */
+  void PrintInnerNodeChildren(const BaseNode* inner_node_p, std::ostream& os,
+                              bool /*show_deltas*/, int /*max_depth*/, int current_depth) {
+    if (!inner_node_p || !inner_node_p->IsInnerNode()) return;
+
+    // 进入 epoch，防止遍历期间节点被回收
+    EpochNode *epoch_node_p = epoch_manager.JoinEpoch();
+
+    // 快照键-子节点对，避免并发修改导致迭代器失效
+    const InnerNode* inner_p = static_cast<const InnerNode*>(inner_node_p);
+    auto begin_it = inner_p->Begin();
+    auto end_it = inner_p->End();
+    using PairType = typename std::decay<decltype(*begin_it)>::type;
+    std::vector<PairType> children;
+    for (auto it = begin_it; it != end_it; ++it) {
+      children.push_back(*it);
+    }
+
+    // 仅打印子节点 ID，避免递归与节点访问
+    os << std::string(current_depth * 2, ' ') << "Children (" << children.size() << "):";
+    size_t printed = 0;
+    for (auto const &p : children) {
+      if (p.second == INVALID_NODE_ID) continue;
+      os << ' ' << p.second;
+      if (++printed >= 16) { os << " ..."; break; }
+    }
+    os << '\n';
+
+    epoch_manager.LeaveEpoch(epoch_node_p);
+  }
+
+  /*
+   * PrintDeltaChain() - 打印delta链信息
+   */
+  void PrintDeltaChain(const BaseNode* node_p, std::ostream& os, int current_depth) {
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 显示delta节点的详细信息
+    os << prefix << "    Delta Node Type: " << GetNodeTypeString(node_p->GetType()) << "\n";
+    
+    // 如果有子节点指针，显示子节点信息
+    if (node_p->GetType() == NodeType::InnerInsertType || 
+        node_p->GetType() == NodeType::InnerDeleteType ||
+        node_p->GetType() == NodeType::LeafInsertType ||
+        node_p->GetType() == NodeType::LeafDeleteType) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        os << prefix << "    Child Node Pointer: " << delta_p->child_node_p << "\n";
+        // 显示子节点的基本信息
+        os << prefix << "    Child Node Info:\n";
+        PrintNodeDetails(delta_p->child_node_p, os, false, current_depth + 2);
+      }
+    }
+    
+    // 添加Delta Chain的额外信息
+    os << prefix << "    Delta Chain Status: Active\n";
+    os << prefix << "    Delta Chain Depth: " << current_depth << "\n";
+    
+    // 递归遍历delta链中的所有节点
+    PrintDeltaChainRecursive(node_p, os, true, -1, current_depth);
+  }
+
+  /*
+   * IsNodeInMainTree() - 检查节点是否在主树结构中
+   * 
+   * 通过递归遍历从根节点开始，检查指定节点是否在主树中
+   */
+  bool IsNodeInMainTree(NodeID target_node_id, NodeID current_node_id, 
+                       std::set<NodeID>& visited) {
+    if (target_node_id == current_node_id) return true;
+    if (visited.find(current_node_id) != visited.end()) return false;
+    
+    visited.insert(current_node_id);
+    const BaseNode* node_p = GetNode(current_node_id);
+    if (!node_p) return false;
+    
+    // 如果是内部节点，检查子节点
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID && IsNodeInMainTree(target_node_id, child_id, visited)) {
+          return true;
+        }
+      }
+    }
+    
+    // 检查delta链
+    if (node_p->IsDeltaNode()) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        // 这里我们需要找到child_node_p对应的NodeID
+        // 由于无法直接从指针获取NodeID，我们暂时跳过这个检查
+        // 在实际使用中，可能需要维护一个指针到NodeID的映射
+      }
+    }
+    
+    return false;
+  }
+
+  /*
+   * IsNodeInMainTree() - 重载版本，用于外部调用
+   */
+  bool IsNodeInMainTree(NodeID target_node_id, NodeID current_node_id) {
+    std::set<NodeID> visited;
+    return IsNodeInMainTree(target_node_id, current_node_id, visited);
+  }
+
+  /*
+   * BuildParentChildMap() - 构建父节点到子节点的映射关系
+   * 
+   * 这个函数会递归遍历整个树结构，找出所有节点的父子关系
+   */
+  void BuildParentChildMap(NodeID node_id, std::map<NodeID, std::vector<NodeID>>& parent_child_map, 
+                          const std::set<NodeID>& all_nodes, int max_depth, int current_depth = 0) {
+    if (max_depth >= 0 && current_depth >= max_depth) return;
+    if (node_id == INVALID_NODE_ID) return;
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 如果是内部节点，递归构建子节点关系
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID && all_nodes.find(child_id) != all_nodes.end()) {
+          // 记录父子关系
+          parent_child_map[node_id].push_back(child_id);
+          // 递归构建子节点的关系
+          BuildParentChildMap(child_id, parent_child_map, all_nodes, max_depth, current_depth + 1);
+        }
+      }
+    }
+    
+    // 如果是delta节点，尝试找到delta链中的子节点
+    if (node_p->IsDeltaNode()) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        // 由于无法直接从指针获取NodeID，我们暂时跳过这个检查
+        // 在实际使用中，可能需要维护一个指针到NodeID的映射
+      }
+    }
+    
+    // 检查右兄弟节点
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != node_id && all_nodes.find(next_id) != all_nodes.end()) {
+      BuildParentChildMap(next_id, parent_child_map, all_nodes, max_depth, current_depth + 1);
+    }
+  }
+
+  /*
+   * DisplayCompleteTree() - 显示完整的树结构
+   * 
+   * 这个函数会显示所有节点的完整树结构，包括那些可能不在主树中的节点
+   */
+  void DisplayCompleteTree(NodeID node_id, const std::map<NodeID, std::vector<NodeID>>& parent_child_map,
+                          const std::set<NodeID>& all_nodes, std::ostream& os, bool show_deltas, 
+                          int max_depth, int current_depth) {
+    if (max_depth >= 0 && current_depth >= max_depth) return;
+    if (node_id == INVALID_NODE_ID) return;
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 打印当前节点
+    std::string prefix = std::string(current_depth * 2, ' ');
+    std::string node_prefix;
+    
+    if (current_depth == 0) {
+      node_prefix = "Root ";
+    } else if (current_depth == 1) {
+      node_prefix = "├─ ";
+    } else {
+      node_prefix = "│  " + std::string((current_depth - 1) * 2, ' ') + "├─ ";
+    }
+    
+    os << prefix << node_prefix << "Node " << node_id << " (" << GetNodeTypeString(node_p->GetType()) << ")\n";
+    
+    // 打印节点详细信息
+    PrintNodeDetails(node_p, os, show_deltas, current_depth + 1);
+    
+    // 显示子节点
+    auto it = parent_child_map.find(node_id);
+    if (it != parent_child_map.end()) {
+      os << std::string((current_depth + 1) * 2, ' ') << "  Children:\n";
+      
+      const std::vector<NodeID>& children = it->second;
+      for (size_t i = 0; i < children.size(); ++i) {
+        NodeID child_id = children[i];
+        std::string child_prefix;
+        if (i == children.size() - 1) {
+          child_prefix = "└─ ";
+        } else {
+          child_prefix = "├─ ";
+        }
+        
+        os << std::string((current_depth + 2) * 2, ' ') << child_prefix << "Node " << child_id << "\n";
+        
+        // 递归显示子节点
+        DisplayCompleteTree(child_id, parent_child_map, all_nodes, os, show_deltas, max_depth, current_depth + 2);
+      }
+    }
+    
+    // 如果是内部节点，显示子节点信息
+    if (node_p->IsInnerNode()) {
+      PrintInnerNodeChildren(node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 如果是delta节点，显示delta链信息
+    if (node_p->IsDeltaNode()) {
+      PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintDeltaChainRecursive() - 递归遍历delta链并打印所有节点
+   */
+  void PrintDeltaChainRecursive(const BaseNode* node_p, std::ostream& os, 
+                               bool show_deltas, int max_depth, int current_depth) {
+    if (!node_p || !node_p->IsDeltaNode()) return;
+    
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 获取delta节点
+    const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+    
+    // 如果有子节点，递归打印
+    if (delta_p->child_node_p) {
+      os << prefix << "  Delta Chain Child:\n";
+      // 注意：这里我们不能直接传递指针，需要找到对应的NodeID
+      // 或者直接打印子节点的信息
+      PrintNodeDetails(delta_p->child_node_p, os, show_deltas, current_depth + 1);
+    }
+    
+    // 尝试通过GetNextNodeID()访问下一个delta节点
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != 0) {
+      const BaseNode* next_node_p = GetNode(next_id);
+      if (next_node_p && next_node_p->IsDeltaNode()) {
+        os << prefix << "  Next Delta Node in Chain:\n";
+        PrintNodeDetails(next_node_p, os, show_deltas, current_depth + 1);
+        // 递归继续遍历delta链
+        PrintDeltaChainRecursive(next_node_p, os, show_deltas, max_depth, current_depth + 1);
+      }
+    }
+    
+    // 添加Delta Chain的递归信息
+    os << prefix << "  Delta Chain Recursion Level: " << current_depth << "\n";
+    os << prefix << "  Delta Chain Max Depth: " << max_depth << "\n";
+    
+    // 继续遍历delta链中的下一个节点
+    if (delta_p->child_node_p && delta_p->child_node_p->IsDeltaNode()) {
+      os << prefix << "  Continuing Delta Chain:\n";
+      PrintDeltaChainRecursive(delta_p->child_node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 尝试通过GetNextNodeID()访问下一个delta节点
+    next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != 0) {
+      const BaseNode* next_node_p = GetNode(next_id);
+      if (next_node_p && next_node_p->IsDeltaNode()) {
+        os << prefix << "  Next Delta Node in Chain (ID: " << next_id << "):\n";
+        PrintNodeDetails(next_node_p, os, show_deltas, current_depth + 1);
+        // 递归继续遍历delta链
+        PrintDeltaChainRecursive(next_node_p, os, show_deltas, max_depth, current_depth + 1);
+      }
+    }
+  }
+
+  /*
+   * GetNodeTypeString() - 将节点类型转换为字符串
+   */
+  std::string GetNodeTypeString(NodeType type) {
+    switch (type) {
+      case NodeType::InnerType: return "Inner";
+      case NodeType::LeafType: return "Leaf";
+      case NodeType::InnerInsertType: return "InnerInsert";
+      case NodeType::InnerDeleteType: return "InnerDelete";
+      case NodeType::InnerSplitType: return "InnerSplit";
+      case NodeType::InnerMergeType: return "InnerMerge";
+      case NodeType::InnerRemoveType: return "InnerRemove";
+      case NodeType::InnerAbortType: return "InnerAbort";
+      case NodeType::LeafInsertType: return "LeafInsert";
+      case NodeType::LeafDeleteType: return "LeafDelete";
+      case NodeType::LeafSplitType: return "LeafSplit";
+      case NodeType::LeafMergeType: return "LeafMerge";
+      case NodeType::LeafRemoveType: return "LeafRemove";
+      default: return "Unknown";
+    }
+  }
+
+  /*
+   * PrintTreeStatistics() - 打印树的统计信息
+   */
+  void PrintTreeStatistics(std::ostream& os = std::cout) {
+    os << "\n=== BwTree Statistics ===\n";
+    
+    NodeID root_id_ = GetRootID();
+    if (root_id_ == INVALID_NODE_ID) {
+      os << "Tree is empty\n";
+      return;
+    }
+    
+    // 统计节点数量和类型
+    std::map<NodeType, int> node_type_counts;
+    std::set<NodeID> visited_nodes;
+    
+    CollectTreeStatistics(root_id_, node_type_counts, visited_nodes);
+    
+    os << "Total Nodes: " << visited_nodes.size() << "\n";
+    os << "Node Type Distribution:\n";
+    for (const auto& pair : node_type_counts) {
+      os << "  " << GetNodeTypeString(pair.first) << ": " << pair.second << "\n";
+    }
+    
+    os << "Next Node ID: " << next_unused_node_id.load() << "\n";
+    os << "=== End of Statistics ===\n";
+  }
+
+  /*
+   * CollectTreeStatistics() - 收集树的统计信息
+   */
+  void CollectTreeStatistics(NodeID node_id, std::map<NodeType, int>& node_type_counts, 
+                           std::set<NodeID>& visited_nodes) {
+    if (node_id == INVALID_NODE_ID || visited_nodes.find(node_id) != visited_nodes.end()) {
+      return;
+    }
+    
+    visited_nodes.insert(node_id);
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 统计节点类型
+    node_type_counts[node_p->GetType()]++;
+    
+    // 如果是内部节点，递归统计子节点
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID) {
+          CollectTreeStatistics(child_id, node_type_counts, visited_nodes);
+        }
+      }
+    }
+    
+    // 检查右兄弟节点
+    if (node_p->IsOnLeafDeltaChain()) {
+      NodeID next_id = node_p->GetNextNodeID();
+      if (next_id != INVALID_NODE_ID) {
+        CollectTreeStatistics(next_id, node_type_counts, visited_nodes);
+      }
+    }
+  }
+#endif  // BWTREE_AUTODUMP
 };  // class BwTree
 
 }  // End index/bwtree namespace
+}
+#ifdef BWTREE_PELOTON
 }  // End peloton/wangziqi2013 namespace
-
 #endif
+
+#endif // BWTREE_PELOTON
+#endif // _BWTREE_H

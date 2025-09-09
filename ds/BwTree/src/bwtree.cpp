@@ -23,6 +23,10 @@ namespace bwtree {
 
 bool print_flag = true;
 
+#ifdef BWTREE_AUTODUMP
+const char* g_bwtree_auto_dump_path = "bwtree_dump.txt";
+#endif
+
 // This will be initialized when thread is initialized and in a per-thread
 // basis, i.e. each thread will get the same initialization image and then
 // is free to change them
