@@ -104,7 +104,7 @@ macro(add_ycsbc_executable target_name compile_definitions)
 endmacro()
 
 # Set different build options
-set(OPT_FLAGS "OPT_GC;OPT_ROOT_READ;OPT_IN_USE_FLAG;OPT_NO_META;OPT_CLEVEL_ROOT_READ")
+set(OPT_FLAGS "OPT_GC;OPT_ROOT_READ;OPT_IN_USE_FLAG;OPT_NO_META;OPT_BATCH_FLUSH;OPT_CLEVEL_ROOT_READ")
 
 add_ycsbc_executable(ycsbc_cc "")
 add_ycsbc_executable(ycsbc_limit_atomic "LIMIT_ATOMIC;NOCC_FLUSH_NODE")

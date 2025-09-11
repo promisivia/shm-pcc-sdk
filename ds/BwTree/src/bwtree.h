@@ -2808,12 +2808,6 @@ class BwTree : public BwTreeBase {
 
       return leaf_node_p;
     }
-#ifdef OPT_OCC_OP
-private:
-    // Using Node version to check correctness
-    // Will delta chain change the leaf node?
-    nt<occ::NodeVersionType> node_version;
-#endif
   };
 
   ////////////////////////////////////////////////////////////////////
