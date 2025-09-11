@@ -352,7 +352,12 @@ public:
     nt_pointer<bucket[]> buckets;
     atomic_type<uint64_t> capacity;
     level_ptr_t up;
-    void clear() { /* TODO: deferred free after rehash everything */ }
+    void clear() {
+      if (buckets) {
+        buckets.free();
+        buckets = nullptr;
+      }
+    }
   };
 
   struct level_meta {
@@ -1426,71 +1431,78 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
 
   bool succ_update = false;
   level_meta *m_copy;
-#ifdef OPT_CLEVEL_ROOT_READ
-  m_copy = get_local_meta(thread_id).load();
-#else
+// #ifdef OPT_CLEVEL_ROOT_READ
+  // m_copy = get_local_meta(thread_id).load();
+// #else
+  // update should always use global meta
   m_copy = meta.load();
-#endif
+// #endif
 
 #ifdef OPT_CLEVEL_ROOT_READ
   // if is_resizing, should first help rehash + mark -1
   if (m_copy->is_resizing) {
+    difference_type f_idx, s_idx;
     level_bucket *src_level = m_copy->last_level;
     level_bucket *dst_level = m_copy->first_level;
-    difference_type bucket_idx = hv; // here hv acts as the source bucket index
 
-    if (src_level == nullptr || dst_level == nullptr) return false;
-    bucket &b = src_level->buckets[bucket_idx];
-    b.flush_no_fence();
-    mfence();
+    uint64_t capacity = src_level->capacity.load(std::memory_order_seq_cst);
+    f_idx = first_index(hv, capacity);
+    s_idx = second_index(partial, f_idx, capacity);
 
-    // move each slot in the bucket to new levels
-    for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
-      // check whether concurrent rehashing is happening
-      if (b.slots[0].p.load(std::memory_order_seq_cst, true) == -1)
-        // concurrent resize has succeeded and mark -1, no need to rehash
-        goto finish_help_resize;
+    std::vector<bucket> buckets_to_flush;
+    buckets_to_flush.push_back(src_level->buckets[f_idx]);
+    buckets_to_flush.push_back(src_level->buckets[s_idx]);
+    for (auto &b : buckets_to_flush) {
+      b.flush_no_fence();
+      mfence();
 
-      KV_entry_ptr_u src_tmp = b.slots[slot_idx];
-      value_type *e = src_tmp.addr(false);
-      if (e == nullptr) continue;
+      // move each slot in the bucket to new levels
+      for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
+        // check whether concurrent rehashing is happening
+        if (b.slots[0].p.load(std::memory_order_seq_cst, true) == -1)
+          // concurrent resize has succeeded and mark -1, no need to rehash
+          goto finish_help_resize;
 
-      difference_type f_idx, s_idx;
-      bool moved = false;
-      hv_type key_hv = hasher{}(e->first);
-      partial_t partial = get_partial(key_hv);
-      f_idx = first_index(key_hv, dst_level->capacity);
-      s_idx = second_index(partial, f_idx, dst_level->capacity);
+        KV_entry_ptr_u src_tmp = b.slots[slot_idx];
+        value_type *e = src_tmp.addr(false);
+        if (e == nullptr) continue;
 
-      bucket &dst_b1 = dst_level->buckets[f_idx];
-      bucket &dst_b2 = dst_level->buckets[s_idx];
+        bool moved = false;
+        hv_type key_hv = hasher{}(e->first);
+        partial_t partial = get_partial(key_hv);
+        f_idx = first_index(key_hv, dst_level->capacity);
+        s_idx = second_index(partial, f_idx, dst_level->capacity);
 
-      for (size_type j = 0; j < assoc_num; j++) {
-        KV_entry_ptr_u dst_tmp = dst_b1.slots[j];
-        if (dst_tmp.addr(false) == nullptr) {
-          uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
-          if (dst_b1.slots[j].p.compare_exchange_strong(
-                  expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
-            b.slots[slot_idx].p.store(0);
-            moved = true;
-            break;
+        bucket &dst_b1 = dst_level->buckets[f_idx];
+        bucket &dst_b2 = dst_level->buckets[s_idx];
+
+        for (size_type j = 0; j < assoc_num; j++) {
+          KV_entry_ptr_u dst_tmp = dst_b1.slots[j];
+          if (dst_tmp.addr(false) == nullptr) {
+            uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+            if (dst_b1.slots[j].p.compare_exchange_strong(
+                    expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+              b.slots[slot_idx].p.store(0);
+              moved = true;
+              break;
+            }
+          }
+
+          dst_tmp = dst_b2.slots[j];
+          if (dst_tmp.addr(false) == nullptr) {
+            uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+            if (dst_b2.slots[j].p.compare_exchange_strong(
+                    expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+              b.slots[slot_idx].p.store(0);
+              moved = true;
+              break;
+            }
           }
         }
 
-        dst_tmp = dst_b2.slots[j];
-        if (dst_tmp.addr(false) == nullptr) {
-          uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
-          if (dst_b2.slots[j].p.compare_exchange_strong(
-                  expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
-            b.slots[slot_idx].p.store(0);
-            moved = true;
-            break;
-          }
-        }
+        // mark resize finished
+        b.slots[0].p.store(-1);
       }
-
-      // mark resize finished
-      b.slots[0].p.store(-1);
     }
   } // not resizing, directly update
 #endif
@@ -1684,6 +1696,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
       continue;
     }
 
+    // std::cout << "resize, last level: " << m->last_level << "first level: " << m->first_level << std::endl;
+
     for (size_type ii = 0; ii < resize_bulk; ii++) {
     RETRY_REHASH:
       m = meta.load();
@@ -1770,12 +1784,17 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
                       << " levels_left: " << levels_left << std::endl;
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
+            // TODO: we now directly set local meta instead of sending messages
             for (int i = 0; i < thread_num; i++) {
               local_meta[i].meta.store(tmp_meta[t_id]);
             }
 #endif
             rc = true;
             expand_bucket = 0;
+            // try to delete old_level when all threads see the new metadata
+            bl->clear();
+            std::cout << "delete bucket level: " << bl << std::endl;
+            
             break;
           } else {
             delete tmp_meta[t_id];

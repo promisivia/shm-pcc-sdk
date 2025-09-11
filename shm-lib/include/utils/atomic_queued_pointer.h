@@ -127,8 +127,14 @@ class nt_pointer {
 template <typename T>
 class nt_pointer<T[]> {
  public:
-  nt_pointer(T *init = nullptr) { store(init); }
-  nt_pointer(const nt_pointer &other) { store(other.load()); }
+  nt_pointer(T *init = nullptr) {
+    size = 0;
+    store(init);
+  }
+  nt_pointer(const nt_pointer &other) {
+    size = other.size;
+    store(other.load());
+  }
 
   template <typename... Args> void allocate(size_t size, Args &&...args) {
     this->size = size;
@@ -212,17 +218,18 @@ class nt_pointer<T[]> {
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
-    return *ptr;
+    return *this;
   }
 
   nt_pointer &operator=(const nt_pointer &rhs) {
     store(rhs.load(memory_order_seq_cst, false));
-    return *ptr;
+    size = rhs.size;
+    return *this;
   }
 
   bool operator==(const nt_pointer &rhs) {
     return load(memory_order_seq_cst, false) ==
-           rhs.load(memory_order_seq_cst, memory_order_seq_cst, false);
+           rhs.load(memory_order_seq_cst, false);
   }
   bool operator==(const T *rhs) {
     return load(memory_order_seq_cst, false) == rhs;
