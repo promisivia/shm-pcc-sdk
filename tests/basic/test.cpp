@@ -158,12 +158,12 @@ void cas_operation(std::vector<double> &times, int thread_id,
 }
 
 void read_operation(std::vector<double> &times, int thread_id,
-                    volatile uint64_t *target, int rept) {
+                    volatile uint64_t *target, uint64_t rept) {
   struct timespec ts_begin, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
-  int rept_time = rept / 1024;
+  uint64_t rept_time = rept / 1024;
   volatile int value;
-  for (int i = 0; i < rept_time; ++i) {
+  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
+  for (uint64_t i = 0; i < rept_time; ++i) {
     REPT1024(asm volatile("" : "=r"(value) : "r"(*target) :));
   }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
@@ -172,12 +172,12 @@ void read_operation(std::vector<double> &times, int thread_id,
 }
 
 void read_flush_operation(std::vector<double> &times, int thread_id,
-                          volatile uint64_t *target, int rept) {
+                          volatile uint64_t *target, uint64_t rept) {
   struct timespec ts_begin, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
-  int rept_time = rept / 1024;
+  uint64_t rept_time = rept / 1024;
   volatile int value;
-  for (int i = 0; i < rept_time; ++i) {
+  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
+  for (uint64_t i = 0; i < rept_time; ++i) {
     REPT1024(clflush_cache_range((void *)target, 64);
              asm volatile("" : "=r"(value) : "r"(*target) : "memory"));
   }
@@ -186,11 +186,11 @@ void read_flush_operation(std::vector<double> &times, int thread_id,
   times[thread_id] = elapsed;
 }
 
-void write_operation(double &times, uint64_t *target, int rept) {
+void write_operation(double &times, uint64_t *target, uint64_t rept) {
   struct timespec ts_begin, ts_end;
+  uint64_t rept_time = rept / 1024;
   clock_gettime(CLOCK_MONOTONIC, &ts_begin);
-  int rept_time = rept / 1024;
-  for (int i = 0; i < rept_time; ++i) {
+  for (uint64_t i = 0; i < rept_time; ++i) {
     REPT1024(*target = 1);
   }
   clock_gettime(CLOCK_MONOTONIC, &ts_end);
@@ -200,8 +200,8 @@ void write_operation(double &times, uint64_t *target, int rept) {
 
 void write_flush_operation(double &times, uint64_t *target, int rept) {
   struct timespec ts_begin, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   int rept_time = rept / 1024;
+  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   for (int i = 0; i < rept_time; ++i) {
     REPT1024(clflush_cache_range(target, 64); *target = 1);
   }
@@ -213,8 +213,8 @@ void write_flush_operation(double &times, uint64_t *target, int rept) {
 void write_clwb_operation(std::vector<double> &times, int thread_id,
                           uint64_t *target, int rept) {
   struct timespec ts_begin, ts_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   int rept_time = rept / 1024;
+  clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   for (int i = 0; i < rept_time; ++i) {
     REPT1024(*target = 1; clwb(target, sizeof(uint64_t)));
   }
@@ -583,9 +583,14 @@ void bind_thread_to_cpu(pthread_t thread, int cpu_id) {
 
 void para_read_test() {
   union CACHELINE *imap = (union CACHELINE *)allocate_memory(CACHELINE_SIZE);
-  std::vector<uint32_t> thread_num_array = {1, 2, 4, 8, 16, 32, 64};
-  size_t total_rept = 1024 * 1024 * 16;
+  std::vector<uint32_t> thread_num_array = {1, 2, 4, 8, 16, 32, 64, 96};
+  uint64_t total_rept = 1024ULL * 1024;
+  if (cache_type == CACHED) {
+    total_rept = 1024ULL * 1024 * 1024 * 8;
+  }
   int max_cpus = std::thread::hardware_concurrency();
+  std::cout << "Max CPUs: " << max_cpus << std::endl;
+  std::cout << "Total rept: " << total_rept << std::endl;
   for (auto thread_num : thread_num_array) {
     std::vector<double> times(thread_num, 0.0);
     std::vector<std::thread> threads(thread_num);
@@ -610,8 +615,59 @@ void para_read_test() {
     }
     double average_time = 0.0;
     for (uint32_t i = 0; i < thread_num; ++i) {
-      std::cout << "Average time: " << times[i] * 1e9 / total_rept << "ns"
-                << std::endl;
+      if (cache_type != CACHED) {
+        std::cout << "Average time: " << times[i] * 1e9 / total_rept << "ns"
+                  << std::endl;
+      }
+      average_time += times[i];
+    }
+    average_time /= thread_num;
+
+    // Thoughput
+    double max_time = *max_element(times.begin(), times.end());
+    // std::cout << "Max time: " << max_time << "ns" << "Average time: " << average_time << "ns" << std::endl;
+    double thoughput = (double)(thread_num * total_rept) / (double)(max_time);
+    double average_throughput = (double)(thread_num * total_rept) / (double)(average_time);
+    std::cout << "Average throughput: " << thoughput << "ops/s" << std::endl;
+    // std::cout << "Average throughput: " << average_throughput << "ops/s" << std::endl;
+  }
+}
+
+void para_read_different_mem_test() {
+  union CACHELINE *imap = (union CACHELINE *)allocate_memory(CACHELINE_SIZE * 192);
+  std::vector<uint32_t> thread_num_array = {1, 2, 4, 8, 16, 32, 64, 96};
+  uint64_t total_rept = 1024ULL * 1024 * 8;
+  if (cache_type == CACHED) {
+    total_rept = 1024ULL * 1024 * 1024 * 8;
+  }
+  int max_cpus = std::thread::hardware_concurrency();
+  for (auto thread_num : thread_num_array) {
+    std::vector<double> times(thread_num, 0.0);
+    std::vector<std::thread> threads(thread_num);
+    std::barrier<> sync_point(thread_num);
+    std::cout << "Average read time for " << thread_num << " threads, total rept: " 
+        << total_rept << std::endl;
+    for (uint32_t i = 0; i < thread_num; ++i) {
+      if (cache_type == UNCACHED_FLUSH)
+        threads[i] = std::thread([&, i]() {
+          // bind_thread_to_cpu(threads[i].native_handle(), i % (max_cpus / 2) + (i % 2) * (max_cpus / 2));
+          sync_point.arrive_and_wait();
+          read_flush_operation(times, i, &imap[i].data.value, total_rept);
+        });
+      else
+        threads[i] = std::thread([&, i]() {
+          sync_point.arrive_and_wait();
+          read_operation(times, i, &imap[i].data.value, total_rept);
+        });
+      bind_thread_to_cpu(threads[i].native_handle(), i % max_cpus);
+    }
+    for (uint32_t i = 0; i < thread_num; ++i) {
+      threads[i].join();
+    }
+    double average_time = 0.0;
+    for (uint32_t i = 0; i < thread_num; ++i) {
+      // std::cout << "Average time: " << times[i] * 1e9 / total_rept << "ns"
+      //           << std::endl;
       average_time += times[i];
     }
     average_time /= thread_num;
@@ -625,7 +681,7 @@ void para_read_test() {
 
 void para_write_test() {
   union CACHELINE *imap = (union CACHELINE *)allocate_memory(CACHELINE_SIZE);
-  std::vector<uint32_t> thread_num_array = {1, 2, 4, 8, 16, 32, 64};
+  std::vector<uint32_t> thread_num_array = {1, 2, 4, 8, 16, 32, 64, 96};
   size_t total_rept = 1024 * 1024 * 16;
   int max_cpus = std::thread::hardware_concurrency();
   for (auto thread_num : thread_num_array) {
@@ -898,6 +954,7 @@ int main(int ac, char **av) {
       {"disagr_cas", {disagr_cas_test, nullptr}},
 #endif
       {"para_read", {nullptr, para_read_test}},
+      {"para_read_different_mem", {nullptr, para_read_different_mem_test}},
       {"para_write", {nullptr, para_write_test}},
       {"para_nt_cas", {nullptr, para_nt_cas_test}},
       {"para_cas", {nullptr, para_cas_test}},

@@ -27,7 +27,7 @@ add_executable(test_basics ${SUBSRCS})
 link_directories(/usr/local/lib)
 
 # Link libraries
-add_subdirectory(../../src/shm ${CMAKE_BINARY_DIR}/shm)
+add_subdirectory(../../shm-lib ${CMAKE_BINARY_DIR}/shm-lib)
 target_link_libraries(test_basics
     shm-lib
 )
