@@ -149,28 +149,6 @@ public:
     }
   }
 
-  // 帮助函数：将level_meta指针的后4位设置为-1
-  static level_meta* set_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      (reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF) | 0xF
-    );
-  }
-
-  // 帮助函数：清除level_meta指针的后4位-1标记
-  static level_meta* clear_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF
-    );
-  }
-
-  // 帮助函数：检查level_meta指针的后4位是否为-1
-  static bool check_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return false;
-    return (reinterpret_cast<uintptr_t>(meta_ptr) & 0xF) == 0xF;
-  }
-
   struct ret {
     bool found;
     uint8_t level_idx;
@@ -608,53 +586,12 @@ public:
 
   mutable std::vector<aligned_level_meta_ptr_t> local_meta;
 
-  // inline level_meta_ptr_t &
-  // get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool help_update = true) const {
-  //   if (local_meta[thread_id].meta == nullptr) {
-  //     local_meta[thread_id].meta = meta;
-  //   }
-  //   level_meta_ptr_t m_cleared = clear_meta_neg1_flag(local_meta[thread_id].meta);
-  //   std::cout << "local meta is " << m_cleared << "Original meta is " << local_meta[thread_id].meta << std::endl;
-  //   if (help_update) {
-  //     // TODO: help update local meta
-  //     local_meta[thread_id].meta = m_cleared;
-  //   }
-  //   return m_cleared;
-  // }
-
-  inline level_meta *get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool nt = true, bool help_update = true) const {
-    if (unlikely(local_meta[thread_id].meta == nullptr)) {
+  inline level_meta_ptr_t &
+  get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id) const {
+    if (local_meta[thread_id].meta == nullptr) {
       local_meta[thread_id].meta = meta;
     }
-    level_meta *meta = local_meta[thread_id].meta.load(std::memory_order_seq_cst, nt);
-    if (likely(!check_meta_neg1_flag(meta))) {
-      return meta;
-    }
-    level_meta *cleared_meta = clear_meta_neg1_flag(meta);
-    if (!help_update) {
-      return cleared_meta;
-    }
-    // meta is set as locked and requires help update
-    // TODO: if the rehash/update thread crashes, the replicas will never be updated
-    // TODO: set value here is dangerous, as the replica may be updated to a newer value
-    while (true) {
-      // check if all meta is set as local_meta[thread_id]
-      bool all_meta_set = true;
-      for (int i = 0; i < thread_num; i++) {
-        if (clear_meta_neg1_flag(local_meta[i].meta.load()) != cleared_meta) {
-          break;
-        }
-      }
-      // if all meta is set as local_meta[thread_id], then clear the neg1 flag
-      if (all_meta_set) {
-        local_meta[thread_id].meta.store(cleared_meta);
-        return cleared_meta;
-      } else {
-        // load the newest meta and restart the loop
-        cleared_meta = clear_meta_neg1_flag(local_meta[thread_id].meta.load());
-      }
-    }
-    return meta;
+    return local_meta[thread_id].meta;
   }
 
   size_type hashpower;
@@ -685,12 +622,11 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
   hv_type hv = hasher{}(key);
   partial_t partial = get_partial(hv);
 
-
-#ifdef OPT_CLEVEL_ROOT_READ
 #ifdef OPT_NO_META
-  level_meta *m = get_local_meta(SimThreadInfo::worker_thread_id, false, false);
+#ifdef OPT_CLEVEL_ROOT_READ
+  level_meta *m = get_local_meta().load(std::memory_order_seq_cst, false);
 #else
-  level_meta *m = get_local_meta();
+  level_meta *m = meta.load(std::memory_order_seq_cst, false);
 #endif
 #else
   level_meta *m = meta.load();
@@ -729,7 +665,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 #ifdef OPT_NO_META
       if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
+        m = get_local_meta().load();
 #else
         m = meta.load();
 #endif
@@ -795,7 +731,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 #ifdef OPT_NO_META
       if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
+        m = get_local_meta().load();
 #else
         m = meta.load();
 #endif
@@ -821,7 +757,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 #ifdef OPT_NO_META
       if ((uintptr_t)s_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
+        m = get_local_meta().load();
 #else
         m = meta.load();
 #endif
@@ -851,7 +787,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = get_local_meta().load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -978,7 +914,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = get_local_meta().load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1221,7 +1157,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = get_local_meta(thread_id).load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1280,7 +1216,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
     // Assume we have limited area of cache coherence and we put meta in
     level_meta *m;
 #ifdef OPT_CLEVEL_ROOT_READ
-    m = get_local_meta(thread_id);
+    m = get_local_meta(thread_id).load();
 #else
     m = meta.load();
 #endif
@@ -1306,7 +1242,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
       uint64_t expected = old_e.p;
       if (e->p.compare_exchange_strong(expected, created.p)) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        if (!m->is_resizing && get_local_meta(thread_id)->is_resizing &&
+        if (!m->is_resizing && get_local_meta(thread_id).load()->is_resizing &&
             level_num == 0) {
 #else
         if (!m->is_resizing && meta.load()->is_resizing && level_num == 0) {
@@ -1346,7 +1282,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
   bool succ_deletion = false;
 
 #ifdef OPT_CLEVEL_ROOT_READ
-  level_meta *m = get_local_meta(thread_id);
+  level_meta *m = get_local_meta(thread_id).load();
 #else
   level_meta *m = meta.load();
 #endif
@@ -1386,7 +1322,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // Therefore, we can do context checking
               // to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{get_local_meta(thread_id).load()};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1428,7 +1364,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // CAS. Therefore, we can do context
               // checking to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{get_local_meta(thread_id).load()};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1457,7 +1393,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = get_local_meta(thread_id).load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1486,11 +1422,10 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
   bool succ_update = false;
   level_meta *m_copy;
 #ifdef OPT_CLEVEL_ROOT_READ
-  m_copy = get_local_meta(thread_id);
+  m_copy = get_local_meta(thread_id).load();
 #else
   m_copy = meta.load();
 #endif
-
   while (true) {
     size_type n_levels;
     uint64_t level_num = 0;
@@ -1521,7 +1456,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
         // such failure.
         level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-        m_copy = get_local_meta(thread_id);
+        tmp_meta = get_local_meta(thread_id).load();
 #else
         tmp_meta = meta.load();
 #endif
@@ -1595,10 +1530,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
         for (int i = 0; i < thread_num; i++) {
-          // 将tmp_meta[t_id]的后4位设置为-1后存储
-          local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+          local_meta[i].meta.store(tmp_meta[t_id]);
         }
-        std::cout << "set meta as " << local_meta[0].meta << std::endl;
 #endif
         break;
       } else {
@@ -1637,10 +1570,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
           for (int i = 0; i < thread_num; i++) {
-            // 将tmp_meta[t_id]的后4位设置为-1后存储
-            local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+            local_meta[i].meta.store(tmp_meta[t_id]);
           }
-          std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
 #endif
           break;
         } else {
@@ -1770,10 +1701,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
             for (int i = 0; i < thread_num; i++) {
-              // 将tmp_meta[t_id]的后4位设置为-1后存储
-              local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+              local_meta[i].meta.store(tmp_meta[t_id]);
             }
-            std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
 #endif
             rc = true;
             expand_bucket = 0;

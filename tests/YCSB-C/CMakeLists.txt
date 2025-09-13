@@ -57,14 +57,14 @@ endif()
 
 add_db("bwtree_db.cc" "BwTree" "bwtree" "ENABLE_BWTREE_DB" "PUBLIC")
 add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
-add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
+# add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
 add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
 # add_db("level_hash_db.cc" "Level-Hashing" "levelhash" "ENABLE_LEVEL_HASH_DB" "PUBLIC")
 add_db("masstree_db.cc" "Masstree" "masstree" "ENABLE_MASSTREE_DB" "PUBLIC")
-add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" "ENABLE_RADIX_ART_OLC_DB" "PUBLIC")
+# add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" "ENABLE_RADIX_ART_OLC_DB" "PUBLIC")
 # add_db("sherman_db.cc" "Sherman" "sherman" "ENABLE_SHERMAN_DB" "PUBLIC")
 # add_db("btree_db.cc" "btree" "USE_BTREE")
-add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" "ENABLE_BTREE_OLC_DB" "HEADER")
+# add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" "ENABLE_BTREE_OLC_DB" "HEADER")
 
 # Link libraries
 
@@ -104,19 +104,19 @@ macro(add_ycsbc_executable target_name compile_definitions)
 endmacro()
 
 # Set different build options
-set(OPT_FLAGS "OPT_GC;OPT_ROOT_READ;OPT_IN_USE_FLAG;OPT_NO_META;OPT_BATCH_FLUSH;OPT_CLEVEL_ROOT_READ")
+set(OPT_FLAGS "OPT_GC;OPT_ROOT_READ;OPT_IN_USE_FLAG;OPT_REPLICATE_META;OPT_BATCH_FLUSH;OPT_CLEVEL_ROOT_READ")
 
 add_ycsbc_executable(ycsbc_cc "")
 add_ycsbc_executable(ycsbc_limit_atomic "LIMIT_ATOMIC;NOCC_FLUSH_NODE")
 add_ycsbc_executable(ycsbc_cc_mq "USE_MSG_QUEUE")
 add_ycsbc_executable(ycsbc_cc_nocc_mq "USE_MSG_QUEUE;USE_NO_CC_QUEUE")
-add_ycsbc_executable(ycsbc_nocc "NO_CC;${OPT_FLAGS}")
+add_ycsbc_executable(ycsbc_nocc "NO_CC;${OPT_FLAGS};QUEUE_SIM_CAS")
 add_ycsbc_executable(ycsbc_nocc_sim "NO_CC;${OPT_FLAGS};NT_SIM")
 add_ycsbc_executable(ycsbc_nocc_dup_flag "NO_CC;${OPT_FLAGS};OPT_DUP_IN_USE_FLAG=4")
 add_ycsbc_executable(ycsbc_nocc_no_opt "NO_CC")
 add_ycsbc_executable(ycsbc_nocc_part_opt "NO_CC;OPT_GC;OPT_ROOT_READ")
-add_ycsbc_executable(ycsbc_nocc_clevel_part1 "NO_CC;OPT_NO_META")
-add_ycsbc_executable(ycsbc_nocc_clevel_part2 "NO_CC;OPT_NO_META;OPT_BATCH_FLUSH")
+add_ycsbc_executable(ycsbc_nocc_clevel_part1 "NO_CC")
+add_ycsbc_executable(ycsbc_nocc_clevel_part2 "NO_CC;OPT_BATCH_FLUSH")
 add_ycsbc_executable(ycsbc_nocc_bwtree_part1 "NO_CC;OPT_GC")
 add_ycsbc_executable(ycsbc_nocc_bwtree_part2 "NO_CC;OPT_GC;OPT_ROOT_READ")
 

@@ -24,9 +24,8 @@
 // Seem to be a mistake, no need to add this opt
 // #define OPT_ONE_META
 
-// #define OPT_NO_META
+// #define OPT_REPLICATE_META
 // #define OPT_BATCH_FLUSH
-
 // #define OPT_CLEVEL_ROOT_READ
 
 #define MAX_LEVEL 16
@@ -89,6 +88,15 @@ public:
   using hv_type = size_t;
   using partial_t = uint16_t;
 
+  // 使用指针末几位全1作为“已完成/占位”标记，不再直接存 -1
+  constexpr static uint64_t k_resize_sentinel_mask = 0xFULL; // 低4位全1
+  static inline bool is_resize_sentinel(uint64_t v) {
+    return (v & k_resize_sentinel_mask) == k_resize_sentinel_mask;
+  }
+  static inline uint64_t make_resize_sentinel(const void *m) {
+    return (reinterpret_cast<uint64_t>(m) | k_resize_sentinel_mask);
+  }
+
   typedef enum FindCode {
     ABSENT_AND_NO_VACANCY = 0,
     FOUND_IN_LEFT = 1,
@@ -147,28 +155,6 @@ public:
       return static_cast<difference_type>(
           (static_cast<uint64_t>(idx) ^ hash_of_tag) % (capacity / 2));
     }
-  }
-
-  // 帮助函数：将level_meta指针的后4位设置为-1
-  static level_meta* set_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      (reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF) | 0xF
-    );
-  }
-
-  // 帮助函数：清除level_meta指针的后4位-1标记
-  static level_meta* clear_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF
-    );
-  }
-
-  // 帮助函数：检查level_meta指针的后4位是否为-1
-  static bool check_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return false;
-    return (reinterpret_cast<uintptr_t>(meta_ptr) & 0xF) == 0xF;
   }
 
   struct ret {
@@ -355,7 +341,13 @@ public:
   struct bucket_s {
     KV_entry_ptr_s slots[assoc_num];
 
-    bucket_s(const bucket &ptr, bool nt = true) {
+    bucket_s(const bucket &ptr, 
+#ifdef NO_CC
+      bool nt = true
+#else
+      bool nt = false
+#endif
+    ) {
       if (nt) {
         ptr.flush_no_fence();
         mfence();
@@ -368,26 +360,63 @@ public:
     nt_pointer<bucket[]> buckets;
     atomic_type<uint64_t> capacity;
     level_ptr_t up;
-
-    void clear() { buckets.free(); }
+    void clear() {
+      if (buckets) {
+        buckets.free();
+        buckets = nullptr;
+      }
+    }
   };
 
   struct level_meta {
     level_ptr_t first_level;
     level_ptr_t last_level;
     atomic_type<char> is_resizing;
+#ifdef OPT_CLEVEL_ROOT_READ
+    vector<nt<bool>> acked_list;
+    atomic_type<bool> all_acked;
+#endif
 
     level_meta() {
       first_level = nullptr;
       last_level = nullptr;
       is_resizing = false;
+#ifdef OPT_CLEVEL_ROOT_READ
+      acked_list.resize(0);
+      all_acked.store(false);
+#endif
     }
 
-    level_meta(const level_ptr_t &fl, const level_ptr_t &ll, bool flag) {
+    level_meta(const level_ptr_t &fl, const level_ptr_t &ll, bool flag
+#ifdef OPT_CLEVEL_ROOT_READ
+      ,int thread_num = 0, bool all_ack = false
+#endif
+    ) {
       first_level = fl;
       last_level = ll;
       is_resizing = flag;
+#ifdef OPT_CLEVEL_ROOT_READ
+      acked_list.resize(thread_num);
+      all_acked.store(all_ack);
+#endif
     }
+
+#ifdef OPT_CLEVEL_ROOT_READ
+  void set_machine_ack(int thread_id) {
+    acked_list[thread_id] = true;
+    // local ack_machine_count
+    int ack_machine_count = 0;
+    for (int i = 0; i < acked_list.size(); i++) {
+      // acked_list is on cxl and load bypass-cache
+      if (acked_list[i].load()) {
+        ack_machine_count++;
+      }
+    }
+    if (ack_machine_count == acked_list.size()) {
+      all_acked.store(true);
+    }
+  }
+#endif
   };
 
   static partial_t get_partial(hv_type hv) {
@@ -411,6 +440,10 @@ public:
 #endif
 
     level_meta *m = meta.load();
+#ifdef OPT_CLEVEL_ROOT_READ
+    // the first meta is seen by all threads
+    m->all_acked.store(true);
+#endif
 
     level_bucket *tmp;
     size_t capacity;
@@ -434,11 +467,11 @@ public:
     run_expand_thread.store(true);
     expand_thread = std::thread(&clevel_hash::resize, this);
 
-    KV_entry_ptr_s e = get_entry(meta->first_level, 0, 0);
-    if (e.addr() != nullptr) {
-      // never fires.
-      get_key(e);
-    }
+    // KV_entry_ptr_s e = get_entry(meta->first_level, 0, 0);
+    // if (e.addr() != nullptr) {
+    //   // never fires.
+    //   get_key(e);
+    // }
   }
 
   static void allocate_KV_copy_construct(value_type *&KV_ptr,
@@ -470,7 +503,7 @@ public:
                      size_type thread_id, size_type id);
 
   // mapped_type
-  ret search(const key_type &key) const;
+  ret search(const key_type &key, size_type thread_id) const;
 
   ret erase(const key_type &key, size_type thread_id);
 
@@ -559,6 +592,11 @@ public:
     for (int i = 0; i < thread_num; i++) {
       local_meta[i] = meta;
     }
+    meta->acked_list.resize(thread_num);
+    for (int i = 0; i < thread_num; i++) {
+      meta->acked_list[i].store(true);
+    }
+    meta->all_acked.store(true);
 #endif
   }
 
@@ -608,53 +646,12 @@ public:
 
   mutable std::vector<aligned_level_meta_ptr_t> local_meta;
 
-  // inline level_meta_ptr_t &
-  // get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool help_update = true) const {
-  //   if (local_meta[thread_id].meta == nullptr) {
-  //     local_meta[thread_id].meta = meta;
-  //   }
-  //   level_meta_ptr_t m_cleared = clear_meta_neg1_flag(local_meta[thread_id].meta);
-  //   std::cout << "local meta is " << m_cleared << "Original meta is " << local_meta[thread_id].meta << std::endl;
-  //   if (help_update) {
-  //     // TODO: help update local meta
-  //     local_meta[thread_id].meta = m_cleared;
-  //   }
-  //   return m_cleared;
-  // }
-
-  inline level_meta *get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool nt = true, bool help_update = true) const {
-    if (unlikely(local_meta[thread_id].meta == nullptr)) {
+  inline level_meta_ptr_t &
+  get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id) const {
+    if (local_meta[thread_id].meta == nullptr) {
       local_meta[thread_id].meta = meta;
     }
-    level_meta *meta = local_meta[thread_id].meta.load(std::memory_order_seq_cst, nt);
-    if (likely(!check_meta_neg1_flag(meta))) {
-      return meta;
-    }
-    level_meta *cleared_meta = clear_meta_neg1_flag(meta);
-    if (!help_update) {
-      return cleared_meta;
-    }
-    // meta is set as locked and requires help update
-    // TODO: if the rehash/update thread crashes, the replicas will never be updated
-    // TODO: set value here is dangerous, as the replica may be updated to a newer value
-    while (true) {
-      // check if all meta is set as local_meta[thread_id]
-      bool all_meta_set = true;
-      for (int i = 0; i < thread_num; i++) {
-        if (clear_meta_neg1_flag(local_meta[i].meta.load()) != cleared_meta) {
-          break;
-        }
-      }
-      // if all meta is set as local_meta[thread_id], then clear the neg1 flag
-      if (all_meta_set) {
-        local_meta[thread_id].meta.store(cleared_meta);
-        return cleared_meta;
-      } else {
-        // load the newest meta and restart the loop
-        cleared_meta = clear_meta_neg1_flag(local_meta[thread_id].meta.load());
-      }
-    }
-    return meta;
+    return local_meta[thread_id].meta;
   }
 
   size_type hashpower;
@@ -681,16 +678,15 @@ template <typename Key, typename T, typename Hash, typename KeyEqual,
           size_t HashPower>
 typename clevel_hash<Key, T, Hash, KeyEqual, HashPower>::ret
 clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
-    const key_type &key) const {
+    const key_type &key, size_type thread_id) const {
   hv_type hv = hasher{}(key);
   partial_t partial = get_partial(hv);
 
-
+#ifdef OPT_REPLICATE_META
 #ifdef OPT_CLEVEL_ROOT_READ
-#ifdef OPT_NO_META
-  level_meta *m = get_local_meta(SimThreadInfo::worker_thread_id, false, false);
+  level_meta *m = get_local_meta().load(std::memory_order_seq_cst, false);
 #else
-  level_meta *m = get_local_meta();
+  level_meta *m = get_local_meta().load();
 #endif
 #else
   level_meta *m = meta.load();
@@ -726,13 +722,13 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 
     for (size_t b = 0; b < possible_buckets.size(); b++) {
       bucket &f_b = *(possible_buckets[b].second);
-#ifdef OPT_NO_META
-      if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
-#ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
-#else
-        m = meta.load();
-#endif
+#ifdef OPT_REPLICATE_META
+      if (is_resize_sentinel(f_b.slots[0].p.load(std::memory_order_seq_cst))) {
+        if (m != ) {
+          m = meta.load();
+          // update local meta to m
+          get_local_meta().store(m);
+        }
         if (m->last_level != backup_last_level) {
           // If the last level has been deleted, go on to the next level.
           b |= 1;
@@ -760,7 +756,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
             }
           }
         }
-#ifdef OPT_NO_META
+#ifdef OPT_REPLICATE_META
       }
 #endif
     }
@@ -770,7 +766,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     do {
       li = next_li;
       level_bucket *cl = li;
-#ifdef OPT_NO_META
+#ifdef OPT_REPLICATE_META
       f_idx =
           first_index(hv, cl->capacity.load(std::memory_order_seq_cst, false));
       s_idx = second_index(partial, f_idx,
@@ -792,10 +788,10 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
       mfence();
 #endif
 
-#ifdef OPT_NO_META
-      if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
+#ifdef OPT_REPLICATE_META
+      if (is_resize_sentinel(f_b.slots[0].p.load(std::memory_order_seq_cst))) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
+        m = get_local_meta().load();
 #else
         m = meta.load();
 #endif
@@ -810,7 +806,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
             }
           }
         }
-#ifdef OPT_NO_META
+#ifdef OPT_REPLICATE_META
       }
 #endif
 
@@ -818,10 +814,10 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
       double_read_count->Increment();
 #endif
 
-#ifdef OPT_NO_META
-      if ((uintptr_t)s_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
+#ifdef OPT_REPLICATE_META
+      if (is_resize_sentinel(s_b.slots[0].p.load(std::memory_order_seq_cst))) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
+        m = get_local_meta().load();
 #else
         m = meta.load();
 #endif
@@ -836,7 +832,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
             }
           }
         }
-#ifdef OPT_NO_META
+#ifdef OPT_REPLICATE_META
       }
 #endif
 
@@ -851,7 +847,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = get_local_meta().load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -978,7 +974,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = get_local_meta().load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1071,8 +1067,8 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
           continue;
         }
 
-#ifdef OPT_NO_META
-        if ((uintptr_t)f_e.addr() == 0xFFFFFFFFFFFF)
+#ifdef OPT_REPLICATE_META
+        if (is_resize_sentinel(f_b.slots[0].p.load()))
           continue;
 #endif
 
@@ -1157,8 +1153,8 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
           continue;
         }
 
-#ifdef OPT_NO_META
-        if ((uintptr_t)s_e.addr(false) == 0xFFFFFFFFFFFF)
+#ifdef OPT_REPLICATE_META
+        if (is_resize_sentinel(s_b.slots[0].p.load()))
           continue;
 #endif
 
@@ -1221,7 +1217,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = get_local_meta(thread_id).load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1280,7 +1276,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
     // Assume we have limited area of cache coherence and we put meta in
     level_meta *m;
 #ifdef OPT_CLEVEL_ROOT_READ
-    m = get_local_meta(thread_id);
+    m = get_local_meta(thread_id).load();
 #else
     m = meta.load();
 #endif
@@ -1306,7 +1302,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
       uint64_t expected = old_e.p;
       if (e->p.compare_exchange_strong(expected, created.p)) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        if (!m->is_resizing && get_local_meta(thread_id)->is_resizing &&
+        if (!m->is_resizing && get_local_meta(thread_id).load()->is_resizing &&
             level_num == 0) {
 #else
         if (!m->is_resizing && meta.load()->is_resizing && level_num == 0) {
@@ -1345,8 +1341,9 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
   partial_t partial = get_partial(hv);
   bool succ_deletion = false;
 
-#ifdef OPT_CLEVEL_ROOT_READ
-  level_meta *m = get_local_meta(thread_id);
+#ifdef OPT_REPLICATE_META
+  // bypass-cache load of meta
+  level_meta *m = get_local_meta(thread_id).load();
 #else
   level_meta *m = meta.load();
 #endif
@@ -1386,7 +1383,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // Therefore, we can do context checking
               // to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{get_local_meta(thread_id).load()};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1399,7 +1396,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
 
                 KV_entry_ptr_s last_bucket_entry{
                     cl->buckets[f_idx - 1].slots[0]};
-                if (last_bucket_entry.p == -1)
+                if (is_resize_sentinel(last_bucket_entry.p))
                   continue;
               }
             } else {
@@ -1428,7 +1425,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // CAS. Therefore, we can do context
               // checking to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{get_local_meta(thread_id).load()};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1441,7 +1438,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
 
                 KV_entry_ptr_s last_bucket_entry{
                     cl->buckets[s_idx - 1].slots[0]};
-                if (last_bucket_entry.p == -1)
+                if (is_resize_sentinel(last_bucket_entry.p))
                   continue;
               }
             } else {
@@ -1457,7 +1454,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = get_local_meta(thread_id).load();
 #else
     tmp_meta = meta.load();
 #endif
@@ -1486,11 +1483,83 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
   bool succ_update = false;
   level_meta *m_copy;
 #ifdef OPT_CLEVEL_ROOT_READ
-  m_copy = get_local_meta(thread_id);
+  // load with 
+  m_copy = get_local_meta(thread_id).load();
 #else
+  // update should always use global meta
   m_copy = meta.load();
 #endif
 
+#ifdef OPT_CLEVEL_ROOT_READ
+  // if is_resizing, should first help rehash + mark -1
+  if (!m_copy->all_acked.load()) {
+    difference_type f_idx, s_idx;
+    level_bucket *src_level = m_copy->last_level;
+    level_bucket *dst_level = m_copy->first_level;
+
+    uint64_t capacity = src_level->capacity.load(std::memory_order_seq_cst);
+    f_idx = first_index(hv, capacity);
+    s_idx = second_index(partial, f_idx, capacity);
+
+    std::vector<bucket> buckets_to_flush;
+    buckets_to_flush.push_back(src_level->buckets[f_idx]);
+    buckets_to_flush.push_back(src_level->buckets[s_idx]);
+    for (auto &b : buckets_to_flush) {
+      b.flush_no_fence();
+      mfence();
+
+      // move each slot in the bucket to new levels
+      for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
+        // check whether concurrent rehashing is happening
+        if (is_resize_sentinel(b.slots[0].p.load(std::memory_order_seq_cst, true)))
+          // concurrent resize has succeeded and mark -1, no need to rehash
+          goto finish_help_resize;
+
+        KV_entry_ptr_u src_tmp = b.slots[slot_idx];
+        value_type *e = src_tmp.addr(false);
+        if (e == nullptr) continue;
+
+        bool moved = false;
+        hv_type key_hv = hasher{}(e->first);
+        partial_t partial = get_partial(key_hv);
+        f_idx = first_index(key_hv, dst_level->capacity);
+        s_idx = second_index(partial, f_idx, dst_level->capacity);
+
+        bucket &dst_b1 = dst_level->buckets[f_idx];
+        bucket &dst_b2 = dst_level->buckets[s_idx];
+
+        for (size_type j = 0; j < assoc_num; j++) {
+          KV_entry_ptr_u dst_tmp = dst_b1.slots[j];
+          if (dst_tmp.addr(false) == nullptr) {
+            uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+            if (dst_b1.slots[j].p.compare_exchange_strong(
+                    expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+              b.slots[slot_idx].p.store(0);
+              moved = true;
+              break;
+            }
+          }
+
+          dst_tmp = dst_b2.slots[j];
+          if (dst_tmp.addr(false) == nullptr) {
+            uint64_t expected = dst_tmp.p.load(std::memory_order_seq_cst, false);
+            if (dst_b2.slots[j].p.compare_exchange_strong(
+                    expected, src_tmp.p.load(std::memory_order_seq_cst, false))) {
+              b.slots[slot_idx].p.store(0);
+              moved = true;
+              break;
+            }
+          }
+        }
+
+        // mark resize finished: 存当前 meta 指针并将低位打标
+        b.slots[0].p.store(make_resize_sentinel(static_cast<const void*>(m_copy)));
+      }
+    }
+  } // not resizing, directly update
+#endif
+
+finish_help_resize:
   while (true) {
     size_type n_levels;
     uint64_t level_num = 0;
@@ -1521,13 +1590,13 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
         // such failure.
         level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-        m_copy = get_local_meta(thread_id);
+        tmp_meta = get_local_meta(thread_id).load();
 #else
         tmp_meta = meta.load();
 #endif
         if (tmp_meta != m_copy ||
             (level_num == 0 &&
-             ((last_bucket_entry != nullptr && last_bucket_entry->p == -1) ||
+             ((last_bucket_entry != nullptr && is_resize_sentinel(last_bucket_entry->p)) ||
               (last_bucket_entry == nullptr && tmp_meta->is_resizing)))) {
           succ_update = true;
           m_copy = tmp_meta;
@@ -1579,12 +1648,21 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
     while (true) {
       if (cl->capacity >= new_capacity) {
         // Help updating meta
+#ifdef OPT_CLEVEL_ROOT_READ
+        tmp_meta[t_id] =
+            new level_meta(m_copy->first_level, m_copy->last_level, true, thread_num, false);
+#else
         tmp_meta[t_id] =
             new level_meta(m_copy->first_level, m_copy->last_level, true);
+#endif
       } else {
+#ifdef OPT_CLEVEL_ROOT_READ
         assert(cl->up.load() != nullptr);
         tmp_meta[t_id] =
-            new level_meta(cl->up.load(), m_copy->last_level, true);
+            new level_meta(cl->up.load(), m_copy->last_level, true, thread_num, false);
+#else
+        tmp_meta[t_id] = new level_meta(cl->up.load(), m_copy->last_level, true);
+#endif
       }
 
       if (meta.compare_exchange_strong(m_copy, tmp_meta[t_id])) {
@@ -1595,10 +1673,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
         for (int i = 0; i < thread_num; i++) {
-          // 将tmp_meta[t_id]的后4位设置为-1后存储
-          local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+          local_meta[i].meta.store(tmp_meta[t_id]);
         }
-        std::cout << "set meta as " << local_meta[0].meta << std::endl;
 #endif
         break;
       } else {
@@ -1623,11 +1699,20 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
       while (true) {
         // Help updating meta
         if (cl->capacity >= new_capacity) {
+#ifdef OPT_CLEVEL_ROOT_READ
+          tmp_meta[t_id] =
+              new level_meta(m_copy->first_level, m_copy->last_level, true, thread_num, false);
+#else
           tmp_meta[t_id] =
               new level_meta(m_copy->first_level, m_copy->last_level, true);
+#endif
         } else {
+#ifdef OPT_CLEVEL_ROOT_READ
           assert(cl->up != nullptr);
+          tmp_meta[t_id] = new level_meta(cl->up, m_copy->last_level, true, thread_num, false);
+#else
           tmp_meta[t_id] = new level_meta(cl->up, m_copy->last_level, true);
+#endif
         }
         if (meta.compare_exchange_strong(m_copy, tmp_meta[t_id])) {
 #ifdef CLEVEL_DEBUG
@@ -1637,10 +1722,9 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
           for (int i = 0; i < thread_num; i++) {
-            // 将tmp_meta[t_id]的后4位设置为-1后存储
-            local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+            local_meta[i].meta.store(meta);
+            meta->set_machine_ack(i);
           }
-          std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
 #endif
           break;
         } else {
@@ -1682,6 +1766,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
       usleep(10000);
       continue;
     }
+
+    // std::cout << "resize, last level: " << m->last_level << "first level: " << m->first_level << std::endl;
 
     for (size_type ii = 0; ii < resize_bulk; ii++) {
     RETRY_REHASH:
@@ -1736,16 +1822,16 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
         } // end for
 
         if (!succ) {
-          std::cout << "expand during resizing!" << std::endl;
+          // std::cout << "expand during resizing!" << std::endl;
           expand(thread_id, m);
           goto RETRY_REHASH;
         }
       } // end for (slot_idx)
 
-#ifdef OPT_NO_META
+#ifdef OPT_REPLICATE_META
         // This bucket has been resized, add a mark to show that none of its
       // value is valid.
-      b.slots[0].p.store(-1);
+      b.slots[0].p.store(make_resize_sentinel(static_cast<const void*>(m)));
 #endif
 
       expand_bucket++;
@@ -1758,8 +1844,13 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
             levels_left++;
             li = li->up;
           }
+#ifdef OPT_CLEVEL_ROOT_READ
+          tmp_meta[t_id] =
+              new level_meta(m->first_level, bl->up, levels_left != 2, thread_num, false);
+#else
           tmp_meta[t_id] =
               new level_meta(m->first_level, bl->up, levels_left != 2);
+#endif
 
           if (meta.compare_exchange_strong(m, tmp_meta[t_id])) {
 #ifdef CLEVEL_DEBUG
@@ -1769,14 +1860,18 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
                       << " levels_left: " << levels_left << std::endl;
 #endif
 #ifdef OPT_CLEVEL_ROOT_READ
+            // TODO: we now directly set local meta instead of sending messages
             for (int i = 0; i < thread_num; i++) {
-              // 将tmp_meta[t_id]的后4位设置为-1后存储
-              local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
+              local_meta[i].meta.store(tmp_meta[t_id]);
             }
-            std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
+            mfence();
 #endif
             rc = true;
             expand_bucket = 0;
+            // try to delete old_level when all threads see the new metadata
+            // bl->clear();
+            // std::cout << "delete bucket level: " << bl << std::endl;
+            
             break;
           } else {
             delete tmp_meta[t_id];

@@ -201,7 +201,7 @@ do_real_task() {
 case $MODE in
 "debug")
 	SERVER_THREADS_N=144
-	run_ycsbc "workloadh_zipfian.spec" true
+	run_ycsbc "workloada_zipfian_1b.spec" true
 	;;
 "test-small")
 	SERVER_THREADS_N=32
@@ -209,10 +209,10 @@ case $MODE in
 	;;
 "test")
 	CLIENT_THREADS_N=48
-	thread_nums=(32)
+	thread_nums=(144)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloadc_uniform.spec"
+		run_ycsbc "workloada_zipfian_1b.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"
