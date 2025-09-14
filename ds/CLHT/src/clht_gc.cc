@@ -54,14 +54,14 @@ clht_gc_thread_init(clht_t* h, int id)
   ht_ts_t* ts = (ht_ts_t*) memalign(CACHE_LINE_SIZE, sizeof(ht_ts_t));
   assert(ts != NULL);
 
-  ts->version = h->ht->version;
+  ts->version = h->data.fields.ht->version;
   ts->id = id;
 
   do
     {
-      ts->next = h->version_list;
+      ts->next = h->data.fields.version_list;
     }
-  while (CAS_U64((volatile size_t*) &h->version_list, (size_t) ts->next, (size_t) ts) != (size_t) ts->next);
+  while (CAS_U64((volatile size_t*) &h->data.fields.version_list, (size_t) ts->next, (size_t) ts) != (size_t) ts->next);
 
   clht_ts_thread = ts;
 }
@@ -133,9 +133,9 @@ clht_gc_collect_all(clht_t* hashtable)
 size_t
 clht_gc_min_version_used(clht_t* h)
 {
-  volatile ht_ts_t* cur = h->version_list;
+  volatile ht_ts_t* cur = h->data.fields.version_list;
 
-  size_t min = h->ht->version;
+  size_t min = h->data.fields.ht->version;
   while (cur != NULL)
     {
       if (cur->version < min)
@@ -157,7 +157,7 @@ static int
 clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 {
   /* if version_min >= current version there is nothing to collect! */
-  if ((hashtable->version_min >= hashtable->ht->version) || TRYLOCK_ACQ(&(hashtable->gc_lock)))
+  if ((hashtable->data.fields.version_min >= hashtable->data.fields.ht->version) || TRYLOCK_ACQ(&(hashtable->data.fields.gc_lock)))
     {
       /* printf("** someone else is performing gc\n"); */
       return 0;
@@ -167,7 +167,7 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 
   /* printf("[GCOLLE-%02d] LOCK  : %zu\n", GET_ID(collect_not_referenced_only), hashtable->version); */
 
-  size_t version_min = hashtable->ht->version; 
+  size_t version_min = hashtable->data.fields.ht->version; 
   if (collect_not_referenced_only)
     {
       version_min = clht_gc_min_version_used(hashtable);
@@ -178,16 +178,16 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 
   int gced_num = 0;
 
-  if (hashtable->version_min >= version_min)
+  if (hashtable->data.fields.version_min >= version_min)
     {
       /* printf("[GCOLLE-%02d] UNLOCK: %zu (nothing to collect)\n", GET_ID(collect_not_referenced_only), hashtable->ht->version); */
-      TRYLOCK_RLS(&(hashtable->gc_lock));
+      TRYLOCK_RLS(&(hashtable->data.fields.gc_lock));
     }
   else
     {
       /* printf("[GCOLLE-%02d] collect from %zu to %zu\n", GET_ID(collect_not_referenced_only), hashtable->version_min, version_min); */
 
-      clht_hashtable_t* cur = hashtable->ht_oldest;
+      clht_hashtable_t* cur = hashtable->data.fields.ht_oldest;
       while (cur != NULL && cur->version < version_min)
 	{
 	  gced_num++;
@@ -199,10 +199,10 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 	  cur = nxt;
 	}
 
-      hashtable->version_min = cur->version;
-      hashtable->ht_oldest = cur;
+      hashtable->data.fields.version_min = cur->version;
+      hashtable->data.fields.ht_oldest = cur;
 
-      TRYLOCK_RLS(&(hashtable->gc_lock));
+      TRYLOCK_RLS(&(hashtable->data.fields.gc_lock));
       /* printf("[GCOLLE-%02d] UNLOCK: %zu\n", GET_ID(collect_not_referenced_only), cur->version); */
     }
 
@@ -262,7 +262,7 @@ clht_gc_destroy(clht_t* hashtable)
 {
 #if !defined(CLHT_LINKED)
   clht_gc_collect_all(hashtable);
-  clht_gc_free(hashtable->ht);
+  clht_gc_free(hashtable->data.fields.ht);
 #ifdef USE_CXL
   cacheable.free(hashtable);
 #else

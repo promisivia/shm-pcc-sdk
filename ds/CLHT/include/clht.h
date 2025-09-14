@@ -179,17 +179,17 @@ typedef volatile uint8_t clht_lock_t;
 
 #ifdef ORIGIN
 #define CLHT_CHECK_RESIZE(w)				\
-  while (unlikely(w->resize_lock == CLHT_LOCK_ACQR))	\
+  while (unlikely(w->data.fields.resize_lock == CLHT_LOCK_ACQR))	\
     {							\
       _mm_pause();					\
-      CLHT_GC_HT_VERSION_USED(w->ht);			\
+      CLHT_GC_HT_VERSION_USED(w->data.fields.ht);			\
     }
 
 #define CLHT_LOCK_RESIZE(w)						\
-  (CAS_U8(&w->resize_lock, CLHT_LOCK_FREE, CLHT_LOCK_ACQR) == CLHT_LOCK_FREE)
+  (CAS_U8(&w->data.fields.resize_lock, CLHT_LOCK_FREE, CLHT_LOCK_ACQR) == CLHT_LOCK_FREE)
 
 #define CLHT_RLS_RESIZE(w)			\
-  w->resize_lock = CLHT_LOCK_FREE
+  w->data.fields.resize_lock = CLHT_LOCK_FREE
 
 #define TRYLOCK_ACQ(lock)			\
   TAS_U8(lock)
@@ -198,17 +198,17 @@ typedef volatile uint8_t clht_lock_t;
   lock = CLHT_LOCK_FREE
 #else
 #define CLHT_CHECK_RESIZE(w)				\
-  while (unlikely(w->resize_lock == CLHT_LOCK_ACQR))	\
+  while (unlikely(w->data.fields.resize_lock == CLHT_LOCK_ACQR))	\
     {							\
       _mm_pause();					\
-      CLHT_GC_HT_VERSION_USED(w->ht);			\
+      CLHT_GC_HT_VERSION_USED(w->data.fields.ht);			\
     }
 
 #define CLHT_LOCK_RESIZE(w)						\
-  (rlock_cas(w->resize_lock, CLHT_LOCK_FREE, CLHT_LOCK_ACQR) == CLHT_LOCK_FREE)
+  (rlock_cas(w->data.fields.resize_lock, CLHT_LOCK_FREE, CLHT_LOCK_ACQR) == CLHT_LOCK_FREE)
 
 #define CLHT_RLS_RESIZE(w)			\
-  rlock_st((rlock_t *)w->resize_lock, CLHT_LOCK_FREE)
+  rlock_st((rlock_t *)w->data.fields.resize_lock, CLHT_LOCK_FREE)
 
 #define TRYLOCK_ACQ(lock)			\
   rlock_tas(lock)

@@ -39,6 +39,7 @@
 
 #include "clht_lb_res.h"
 #include "shm/mm.h"
+#include "../external/include/utils.h"
 extern MemoryManager cacheable;
 
 //#define CLHTDEBUG
@@ -116,7 +117,7 @@ static inline void cpu_pause()
     __asm__ volatile ("pause" ::: "memory");
 }
 
-static inline unsigned long read_tsc(void)
+static inline unsigned long read_tsc_local(void)
 {
     unsigned long var;
     unsigned int hi, lo;
@@ -138,7 +139,7 @@ static inline void clflush(char *data, int len, bool front, bool back)
     if (front)
         mfence();
     for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
-        unsigned long etsc = read_tsc() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
+        unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
 #ifdef CLFLUSH
         asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
 #elif CLFLUSH_OPT
@@ -146,7 +147,7 @@ static inline void clflush(char *data, int len, bool front, bool back)
 #elif CLWB
         asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(ptr)));
 #endif
-	    while(read_tsc() < etsc) cpu_pause();
+	    while(read_tsc_local() < etsc) cpu_pause();
     }
     if (back)
         mfence();
@@ -158,7 +159,7 @@ static inline void clflush_next_check(char *data, int len, bool fence)
     if (fence)
         mfence();
     for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
-        unsigned long etsc = read_tsc() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
+        unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
 #ifdef CLFLUSH
         asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
 #elif CLFLUSH_OPT
@@ -168,7 +169,7 @@ static inline void clflush_next_check(char *data, int len, bool fence)
 #endif
 		if (((bucket_t *)ptr)->next)
             clflush_next_check((char *)(((bucket_t *)ptr)->next), sizeof(bucket_t), false);
-        while(read_tsc() < etsc) cpu_pause();
+        while(read_tsc_local() < etsc) cpu_pause();
     }
     if (fence)
         mfence();
@@ -238,8 +239,8 @@ clht_create(uint64_t num_buckets)
         return NULL;
     }
 
-    w->ht = clht_hashtable_create(num_buckets);
-    if (w->ht == NULL)
+    w->data.fields.ht = clht_hashtable_create(num_buckets);
+    if (w->data.fields.ht == NULL)
     {
 #ifdef USE_CXL
         cacheable.free(w);
@@ -248,21 +249,21 @@ clht_create(uint64_t num_buckets)
 #endif
         return NULL;
     }
-    rlock_st((rlock_t *)&(w->resize_lock), LOCK_FREE);
-    rlock_st((rlock_t *)&(w->gc_lock), LOCK_FREE);
-    rlock_st((rlock_t *)&(w->status_lock), LOCK_FREE);
-    w->version_list = NULL;
-    w->version_min = 0;
-    w->ht_oldest = w->ht;
+    rlock_st((rlock_t *)&(w->data.fields.resize_lock), LOCK_FREE);
+    rlock_st((rlock_t *)&(w->data.fields.gc_lock), LOCK_FREE);
+    rlock_st((rlock_t *)&(w->data.fields.status_lock), LOCK_FREE);
+    w->data.fields.version_list = NULL;
+    w->data.fields.version_min = 0;
+    w->data.fields.ht_oldest = w->data.fields.ht;
 
 #ifdef PERSIST
-    clflush((char *)w->ht->table, num_buckets * sizeof(bucket_t), false, true);
-    clflush((char *)w->ht, sizeof(clht_hashtable_t), false, true);
+    clflush((char *)w->data.fields.ht->table, num_buckets * sizeof(bucket_t), false, true);
+    clflush((char *)w->data.fields.ht, sizeof(clht_hashtable_t), false, true);
     clflush((char *)w, sizeof(clht_t), false, true);
 #endif
 #ifdef NO_CC
-    clwb((char *)w->ht->table, num_buckets * sizeof(bucket_t));
-    clwb((char *)w->ht, sizeof(clht_hashtable_t));
+    clwb((char *)w->data.fields.ht->table, num_buckets * sizeof(bucket_t));
+    clwb((char *)w->data.fields.ht, sizeof(clht_hashtable_t));
     clwb((char *)w, sizeof(clht_t));
 #endif
     return w;
@@ -412,7 +413,7 @@ bucket_exists(volatile bucket_t* bucket, clht_addr_t key)
 /* Insert a key-value entry into a hash table. */
 bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 {
-    clht_hashtable_t* hashtable = h->ht;
+    clht_hashtable_t* hashtable = h->data.fields.ht;
     size_t bin = clht_hash(hashtable, key);
     volatile bucket_t* bucket = hashtable->table + bin;
 #if CLHT_READ_ONLY_FAIL == 1
@@ -426,7 +427,7 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
     volatile clht_lock_t *lock = &(bucket->lock);
     while (!LOCK_ACQ(lock, hashtable))
     {
-        hashtable = h->ht;
+        hashtable = h->data.fields.ht;
         size_t bin = clht_hash(hashtable, key);
         bucket = hashtable->table + bin;
         lock = &(bucket->lock);
@@ -519,7 +520,7 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 /* Remove a key-value entry from a hash table. */
 clht_val_t clht_remove(clht_t* h, clht_addr_t key)
 {
-    clht_hashtable_t* hashtable = h->ht;
+    clht_hashtable_t* hashtable = h->data.fields.ht;
     size_t bin = clht_hash(hashtable, key);
     volatile bucket_t* bucket = hashtable->table + bin;
 
@@ -534,7 +535,7 @@ clht_val_t clht_remove(clht_t* h, clht_addr_t key)
     volatile clht_lock_t *lock = &(bucket->lock);
     while (!LOCK_ACQ(lock, hashtable))
     {
-        hashtable = h->ht;
+        hashtable = h->data.fields.ht;
         size_t bin = clht_hash(hashtable, key);
         bucket = hashtable->table + bin;
         lock = &(bucket->lock);
@@ -628,7 +629,7 @@ bucket_cpy(clht_t* h, volatile bucket_t* bucket, clht_hashtable_t* ht_new)
             		DEBUG_PRINT("-------------ht new------------\n");
             		clht_print(ht_new);
             		DEBUG_PRINT("-------------ht current------------\n");
-            		clht_print(h->ht);
+            		clht_print(h->data.fields.ht);
             		DEBUG_PRINT("-------------------------\n");
             		return -1;
         		}
@@ -688,9 +689,9 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
 
     check_ht_status_steps = CLHT_STATUS_INVOK;
 
-    clht_hashtable_t* ht_old = h->ht;
+    clht_hashtable_t* ht_old = h->data.fields.ht;
 
-    if (TRYLOCK_ACQ(&(h->resize_lock)))
+    if (TRYLOCK_ACQ(&(h->data.fields.resize_lock)))
     {
         return 0;
     }
@@ -793,7 +794,7 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
     		DEBUG_PRINT("-------------ht new------------\n");
     		clht_print(ht_new);
     		DEBUG_PRINT("-------------ht current------------\n");
-    		clht_print(h->ht);
+    		clht_print(h->data.fields.ht);
     		DEBUG_PRINT("-------------------------\n");
         	return -1; 
         }   
@@ -812,7 +813,7 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
 	// atomically swap the root pointer
     //SWAP_U64((uint64_t*) h, (uint64_t) ht_new);
     //clflush((char *)h, sizeof(uint64_t), false, true);
-    movnt64((uint64_t *)&h->ht, (uint64_t)ht_new, false, true);
+    movnt64((uint64_t *)&h->data.fields.ht, (uint64_t)ht_new, false, true);
 
 #if defined(CRASH_AFTER_SWAP_CLHT)
 	pid_t pid1 = fork();
@@ -828,7 +829,7 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
     		DEBUG_PRINT("-------------ht new------------\n");
     		clht_print(ht_new);
     		DEBUG_PRINT("-------------ht current------------\n");
-    		clht_print(h->ht);
+    		clht_print(h->data.fields.ht);
     		DEBUG_PRINT("-------------------------\n");
 			return -1;
 		}
@@ -845,7 +846,7 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
 #endif
 	DEBUG_PRINT("Parent reached correctly\n"); 
     ht_old->table_new = ht_new;
-    TRYLOCK_RLS(&(h->resize_lock));
+    TRYLOCK_RLS(&(h->data.fields.resize_lock));
 
 //    ticks e = getticks() - s;
 //    double mba = (ht_new->num_buckets * 64) / (1024.0 * 1024);
@@ -858,7 +859,7 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
 	DEBUG_PRINT("-------------ht new------------\n");
 	clht_print(ht_new);
     DEBUG_PRINT("-------------ht current------------\n");
-    clht_print(h->ht);
+    clht_print(h->data.fields.ht);
 	DEBUG_PRINT("-------------------------\n");
 #endif
 
@@ -910,12 +911,12 @@ clht_size(clht_hashtable_t* hashtable)
     size_t
 ht_status(clht_t* h, int resize_increase, int just_print)
 {
-    if (TRYLOCK_ACQ(&(h->status_lock)) && !resize_increase)
+    if (TRYLOCK_ACQ(&(h->data.fields.status_lock)) && !resize_increase)
     {
         return 0;
     }
 
-    clht_hashtable_t* hashtable = h->ht;
+    clht_hashtable_t* hashtable = h->data.fields.ht;
     uint64_t num_buckets = hashtable->num_buckets;
     volatile bucket_t* bucket = NULL;
     size_t size = 0;
@@ -992,7 +993,7 @@ ht_status(clht_t* h, int resize_increase, int just_print)
         clht_gc_collect(h);
     }
 
-    TRYLOCK_RLS(&(h->status_lock));
+    TRYLOCK_RLS(&(h->data.fields.status_lock));
     return size;
 }
 
@@ -1068,12 +1069,12 @@ clht_print(clht_hashtable_t* hashtable)
 void clht_lock_initialization(clht_t *h)
 {
 	DEBUG_PRINT("Performing Lock initialization\n");
-    clht_hashtable_t *ht = h->ht;
+    clht_hashtable_t *ht = h->data.fields.ht;
     volatile bucket_t *next;
 
-    rlock_st((rlock_t *)&(h->resize_lock), LOCK_FREE);
-    rlock_st((rlock_t *)&(h->status_lock), LOCK_FREE);
-    rlock_st((rlock_t *)&(h->gc_lock), LOCK_FREE);
+    rlock_st((rlock_t *)&(h->data.fields.resize_lock), LOCK_FREE);
+    rlock_st((rlock_t *)&(h->data.fields.status_lock), LOCK_FREE);
+    rlock_st((rlock_t *)&(h->data.fields.gc_lock), LOCK_FREE);
 
     int i;
     for (i = 0; i < ht->num_buckets; i++) {

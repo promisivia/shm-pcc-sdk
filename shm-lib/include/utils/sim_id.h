@@ -1,6 +1,8 @@
 #pragma once
 #include <atomic>
 
+#define DEFAULT_MACHINE_COUNT (16)
+
 class SimThreadInfo {
 public:
   enum class THREAD_ROLE {

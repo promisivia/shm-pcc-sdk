@@ -180,9 +180,9 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) bucket_s
 
 typedef struct ALIGNED(CACHE_LINE_SIZE) clht
 {
-  union
+  union clht_data
   {
-    struct
+    struct clht_fields
     {
       struct clht_hashtable_s* ht;
       uint8_t next_cache_line[CACHE_LINE_SIZE - (sizeof(void*))];
@@ -192,9 +192,9 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht
       volatile clht_lock_t resize_lock;
       volatile clht_lock_t gc_lock;
       volatile clht_lock_t status_lock;
-    };
+    } fields;
     uint8_t padding[2 * CACHE_LINE_SIZE];
-  };
+  } data;
 } clht_t;
 
 typedef struct ALIGNED(CACHE_LINE_SIZE) clht_hashtable_s

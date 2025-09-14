@@ -3,6 +3,7 @@
 #if defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
 #include "config.h"
 #include "utils/bypass_cache.h"
+#include "utils/atomic_variable.h"
 
 typedef uint8_t lock_t;
 typedef uint16_t owner_t;
@@ -10,7 +11,11 @@ typedef uint16_t owner_t;
 #define DEFAULT_OWNER (0)
 
 struct alignas(CACHE_LINE_SIZE) rlock {
+#ifdef NO_CC
+    nt<lock_t> lock_;
+#else
     lock_t lock_;
+#endif
     owner_t owner_;
     char padding_[CACHE_LINE_SIZE - sizeof(lock_t) - sizeof(owner_t)];
 };

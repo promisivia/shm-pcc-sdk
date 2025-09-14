@@ -64,7 +64,7 @@ int CLHTDB::Read(const std::string &table, const std::string &key,
   int finish = false;
   auto task = [this, key, &finish]() {
     uint64_t key_index = convert_std_hash(key);
-    clht_get(this->hashtable->ht, key_index);
+    clht_get(this->hashtable->data.fields.ht, key_index);
 // auto ret = (val != 0) ? DB::kOK : DB::kErrorNoData;
 #ifdef RETURN_SYNC
     finish = true;
@@ -100,7 +100,7 @@ int CLHTDB::Read(uint64_t key, uint64_t &value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
   auto task = [this, key, &finish]() {
-    clht_get(this->hashtable->ht, key);
+    clht_get(this->hashtable->data.fields.ht, key);
 // auto ret = (val != 0) ? DB::kOK : DB::kErrorNoData;
 #ifdef RETURN_SYNC
     finish = true;
@@ -123,7 +123,7 @@ int CLHTDB::Read(uint64_t key, uint64_t &value) {
   return DB::kOK;
 #endif
 #else
-  value = clht_get(this->hashtable->ht, key);
+  value = clht_get(this->hashtable->data.fields.ht, key);
   return DB::kOK;
 #endif
 }
