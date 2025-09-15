@@ -207,6 +207,11 @@ clht_bucket_create()
     }
     bucket->next = NULL;
 
+#ifdef NO_CC
+    clwb((char *)bucket, sizeof(bucket_t));
+    mfence();
+#endif
+
     return bucket;
 }
 
@@ -433,6 +438,12 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
         lock = &(bucket->lock);
     }
 
+    // acquire the lock on the bucket
+#ifdef NO_CC
+    clflush((char *)bucket, sizeof(bucket_t));
+    mfence();
+#endif
+
     CLHT_GC_HT_VERSION_USED(hashtable);
     CLHT_CHECK_STATUS(h);
     clht_addr_t* empty = NULL;
@@ -445,8 +456,11 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
         {
             if (bucket->key[j] == key) 
             {
+#ifdef NO_CC
+                clwb((char *)bucket, sizeof(bucket_t));
+                mfence();
+#endif
                 LOCK_RLS(lock);
-                // printf("[%s] %d\n", __func__, __LINE__);
                 return false;
             }
             else if (empty == NULL && bucket->key[j] == 0)
@@ -477,9 +491,6 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 #ifdef PERSIST
                 clflush((char *)b, sizeof(bucket_t), false, true);
 #endif
-#ifdef NO_CC
-                clwb((char *)b, sizeof(bucket_t));
-#endif
                 movnt64((uint64_t *)&bucket->next, (uint64_t)b, false, true);
             }
             else
@@ -492,12 +503,12 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 #ifdef PERSIST
                 clflush((char *)empty_v, sizeof(clht_val_t), false, true);
 #endif
-#ifdef NO_CC
-                clwb((char *)empty_v, sizeof(clht_val_t));
-#endif
                 movnt64((uint64_t *)empty, (uint64_t)key, false, true);
             }
-
+#ifdef NO_CC
+            clwb((char *)bucket, sizeof(bucket_t));
+            mfence();
+#endif
             LOCK_RLS(lock);
             if (unlikely(resize))
             {

@@ -726,43 +726,14 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 
     for (size_t b = 0; b < possible_buckets.size(); b++) {
       bucket &f_b = *(possible_buckets[b].second);
-#ifdef OPT_NO_META
-      if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
-#ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
-#else
-        m = meta.load();
-#endif
-        if (m->last_level != backup_last_level) {
-          // If the last level has been deleted, go on to the next level.
-          b |= 1;
-          backup_last_level = m->last_level;
-          continue;
-        } else if (m->first_level != backup_first_level) {
-          // If a new first level is added, collect the corresponding buckets.
-          level_bucket *cl = m->first_level;
-          backup_first_level = m->first_level;
-          difference_type f_idx = first_index(
-              hv, cl->capacity.load(std::memory_order_seq_cst, false));
-          difference_type s_idx =
-              second_index(partial, f_idx,
-                           cl->capacity.load(std::memory_order_seq_cst, false));
-          possible_buckets.emplace_back(f_idx, &cl->buckets[f_idx]);
-          possible_buckets.emplace_back(s_idx, &cl->buckets[s_idx]);
-        }
-      } else {
-#endif
-        for (size_type j = 0; j < assoc_num; j++) {
-          KV_entry_ptr_s slot = f_b.slots[j];
-          if (slot.partial() == partial && slot.addr() != nullptr) {
-            if (key_equal{}(slot.addr()->first, key)) {
-              return ret(b / 2, possible_buckets[b].first, j, slot.addr());
-            }
+      for (size_type j = 0; j < assoc_num; j++) {
+        KV_entry_ptr_s slot = f_b.slots[j];
+        if (slot.partial() == partial && slot.addr() != nullptr) {
+          if (key_equal{}(slot.addr()->first, key)) {
+            return ret(b / 2, possible_buckets[b].first, j, slot.addr());
           }
         }
-#ifdef OPT_NO_META
       }
-#endif
     }
 #else
     difference_type f_idx, s_idx;
@@ -770,16 +741,10 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     do {
       li = next_li;
       level_bucket *cl = li;
-#ifdef OPT_NO_META
-      f_idx =
-          first_index(hv, cl->capacity.load(std::memory_order_seq_cst, false));
-      s_idx = second_index(partial, f_idx,
-                           cl->capacity.load(std::memory_order_seq_cst, false));
-#else
+
       f_idx = first_index(hv, cl->capacity.load(std::memory_order_seq_cst));
       s_idx = second_index(partial, f_idx,
                            cl->capacity.load(std::memory_order_seq_cst));
-#endif
 
       bucket &f_b = cl->buckets[f_idx];
       bucket &s_b = cl->buckets[s_idx];
@@ -791,54 +756,26 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
       s_b.flush_no_fence();
       mfence();
 #endif
-
-#ifdef OPT_NO_META
-      if ((uintptr_t)f_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
-#ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
-#else
-        m = meta.load();
-#endif
-        goto RETRY_READ;
-      } else {
-#endif
-        for (size_type j = 0; j < assoc_num; j++) {
-          KV_entry_ptr_s slot = f_b.slots[j];
-          if (slot.partial() == partial && slot.addr() != nullptr) {
-            if (key_equal{}(slot.addr()->first, key)) {
-              return ret(i, f_idx, j, slot.addr());
-            }
+      for (size_type j = 0; j < assoc_num; j++) {
+        KV_entry_ptr_s slot = f_b.slots[j];
+        if (slot.partial() == partial && slot.addr() != nullptr) {
+          if (key_equal{}(slot.addr()->first, key)) {
+            return ret(i, f_idx, j, slot.addr());
           }
         }
-#ifdef OPT_NO_META
       }
-#endif
 
 #ifdef CLEVEL_DOUBLE_READ_COUNT
       double_read_count->Increment();
 #endif
-
-#ifdef OPT_NO_META
-      if ((uintptr_t)s_b.slots[0].addr(false) == 0xFFFFFFFFFFFF) {
-#ifdef OPT_CLEVEL_ROOT_READ
-        m = get_local_meta();
-#else
-        m = meta.load();
-#endif
-        goto RETRY_READ;
-      } else {
-#endif
-        for (size_type j = 0; j < assoc_num; j++) {
-          KV_entry_ptr_s slot = s_b.slots[j];
-          if (slot.partial() == partial && slot.addr() != nullptr) {
-            if (key_equal{}(slot.addr()->first, key)) {
-              return ret(i, s_idx, j, slot.addr());
-            }
+      for (size_type j = 0; j < assoc_num; j++) {
+        KV_entry_ptr_s slot = s_b.slots[j];
+        if (slot.partial() == partial && slot.addr() != nullptr) {
+          if (key_equal{}(slot.addr()->first, key)) {
+            return ret(i, s_idx, j, slot.addr());
           }
         }
-#ifdef OPT_NO_META
       }
-#endif
 
       next_li = cl->up;
 #ifdef CLEVEL_DOUBLE_READ_COUNT

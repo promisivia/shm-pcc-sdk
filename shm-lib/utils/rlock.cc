@@ -25,9 +25,6 @@ void rlock_unlock(rlock_t *l) {
     l->lock_ = 0;
 #endif
     l->owner_ = 0;
-#ifdef NO_CC
-    clwb((void*)&(l->lock_), sizeof(lock_t));
-#endif
 }
 
 void rlock_st(rlock_t *l, const lock_t value) {
@@ -36,14 +33,10 @@ void rlock_st(rlock_t *l, const lock_t value) {
 #else
     l->lock_ = value;
 #endif
-#ifdef NO_CC
-    clwb((void*)&(l->lock_), sizeof(lock_t));
-#endif
 }
 
 lock_t rlock_ld(rlock_t *l) {
 #ifdef NO_CC
-    clflush((void*)&(l->lock_), sizeof(lock_t));
     return l->lock_.load();
 #else
     return l->lock_;
@@ -58,9 +51,6 @@ lock_t rlock_cas(rlock_t *l, lock_t expected, lock_t desired) {
     (void) l->lock_.compare_exchange_strong(exp, desired);
 #else
     ll = __sync_val_compare_and_swap(&(l->lock_), expected, desired);
-#endif
-#ifdef NO_CC
-    clwb((void*)&(l->lock_), sizeof(lock_t));
 #endif
     return ll;
 }
@@ -78,9 +68,6 @@ lock_t rlock_tas(rlock_t *l) {
     __asm__ __volatile__("xchgb %0,%1"
             : "=q"(oldval), "=m"(*addr)
             : "0"((unsigned char) 0xff), "m"(*addr) : "memory");
-#endif
-#ifdef NO_CC
-    clwb((void*)&(l->lock_), sizeof(lock_t));
 #endif
     return (lock_t) oldval;
 }
