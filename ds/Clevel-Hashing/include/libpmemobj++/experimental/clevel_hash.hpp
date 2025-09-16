@@ -810,7 +810,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::del_dup(
   if (e1 != *p1 || e2 != *p2)
     return;
 
-  if (tmp1_u.partial(false) == tmp2_u.partial(false)) {
+  if (tmp1_u.partial(true) == tmp2_u.partial(true)) {
     // 1. Refer to the same location
     if (e1 == e2) {
 #ifdef NO_CC
@@ -822,7 +822,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::del_dup(
     }
 
     // 2. Refer to different locations with the same contents
-    else if (key_equal{}(e1.addr(false)->first, e2.addr(false)->first)) {
+    else if (key_equal{}(e1.addr()->first, e2.addr(true)->first)) {
 #ifdef NO_CC
       uint64_t expected = e2.p;
 #else
@@ -830,7 +830,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::del_dup(
 #endif
       bool ret = p2->p.compare_exchange_strong(expected, 0);
       if (ret) {
-        delete e2.addr(false);
+        delete e2.addr();
       }
     }
   }
@@ -880,7 +880,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
       s_b.flush_no_fence();
       mfence();
       for (size_type j = 0; j < assoc_num; j++) {
-        if (!found_empty_in_b && f_b.slots[j].addr(false) == nullptr) {
+        if (!found_empty_in_b && f_b.slots[j].addr() == nullptr) {
           found_empty_in_b = true;
 
           result = VACANCY_IN_LEFT;
@@ -894,7 +894,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
       // slot in a bucket.
       found_empty_in_b = false;
       for (size_type j = 0; j < assoc_num; j++) {
-        if (!found_empty_in_b && s_b.slots[j].addr(false) == nullptr) {
+        if (!found_empty_in_b && s_b.slots[j].addr() == nullptr) {
           found_empty_in_b = true;
 
           // We prefer the less loaded bucket
@@ -966,11 +966,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     // Bottom-to-top search.
     for (size_type i = 0; i < n_levels; i++) {
       cl = levels[i];
-#ifdef NO_CC
-      uint64_t capacity = cl->capacity.load(std::memory_order_seq_cst, false);
-#else
       uint64_t capacity = cl->capacity.load(std::memory_order_seq_cst);
-#endif
       f_idx = first_index(hv, capacity);
       s_idx = second_index(partial, f_idx, capacity);
 
@@ -984,7 +980,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
       s_b.flush_no_fence();
       mfence();
 
-      bucket_s f_b_s(f_b, false), s_b_s(s_b, false);
+      bucket_s f_b_s(f_b, true), s_b_s(s_b, true);
 
       for (size_type j = 0; j < assoc_num; j++) {
         f_e = f_b_s.slots[j];
@@ -1007,11 +1003,6 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
           }
           continue;
         }
-
-#ifdef OPT_NO_META
-        if ((uintptr_t)f_e.addr() == 0xFFFFFFFFFFFF)
-          continue;
-#endif
 
         if (f_e.partial() != partial || !key_equal{}(f_e.addr()->first, key))
           continue;
@@ -1070,7 +1061,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
       found_empty_in_b = false;
       for (size_type j = 0; j < assoc_num; j++) {
         s_e = s_b_s.slots[j];
-        if (s_e.addr(false) == nullptr) {
+        if (s_e.addr() == nullptr) {
           // Since empty slots in top levels are preferred, update
           // vacancy info as long as identical keys are not found.
           if (result != FOUND_IN_LEFT && result != FOUND_IN_RIGHT &&
@@ -1094,13 +1085,8 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
           continue;
         }
 
-#ifdef OPT_NO_META
-        if ((uintptr_t)s_e.addr(false) == 0xFFFFFFFFFFFF)
-          continue;
-#endif
-
-        if (s_e.partial(false) != partial ||
-            !key_equal{}(s_e.addr(false)->first, key))
+        if (s_e.partial() != partial ||
+            !key_equal{}(s_e.addr()->first, key))
           continue;
 
         if (!fix_dup) {
@@ -1305,13 +1291,13 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
       mfence();
       for (size_type j = 0; j < assoc_num; j++) {
         KV_entry_ptr_s tmp(f_b.slots[j]);
-        if (tmp.partial(false) == partial && tmp.addr(false) != 0) {
-          if (key_equal{}(tmp.addr(false)->first, key)) {
+        if (tmp.partial(true) == partial && tmp.addr(true) != 0) {
+          if (key_equal{}(tmp.addr(true)->first, key)) {
             uint64_t expected = tmp.p;
             if (f_b.slots[j].p.compare_exchange_strong(expected, 0)) {
               succ_deletion = true;
 
-              delete tmp.addr(false);
+              delete tmp.addr(true);
 
               // Instead of redoing the delete to
               // guarantee the deletion is successful,
@@ -1348,13 +1334,13 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
 
       for (size_type j = 0; j < assoc_num; j++) {
         KV_entry_ptr_s tmp(s_b.slots[j]);
-        if (tmp.partial(false) == partial && tmp.addr(false) != nullptr) {
+        if (tmp.partial(true) == partial && tmp.addr(true) != nullptr) {
           if (key_equal{}(tmp.addr(false)->first, key)) {
             uint64_t expected = tmp.p;
             bool ret = s_b.slots[j].p.compare_exchange_strong(expected, 0);
             if (ret) {
               succ_deletion = true;
-              delete tmp.addr(false);
+              delete tmp.addr(true);
               // Instead of redoing the delete to
               // guarantee the deletion is
               // successful, we apply context checking
