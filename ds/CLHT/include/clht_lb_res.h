@@ -168,10 +168,15 @@ typedef volatile uint8_t clht_lock_t;
 typedef struct ALIGNED(CACHE_LINE_SIZE) bucket_s
 {
   clht_lock_t lock;
-  volatile uint32_t hops;
+  uint32_t hops;
+#ifdef NO_CC
+  nt<clht_addr_t> key[ENTRIES_PER_BUCKET];
+  nt<clht_val_t> val[ENTRIES_PER_BUCKET];
+#else
   clht_addr_t key[ENTRIES_PER_BUCKET];
   clht_val_t val[ENTRIES_PER_BUCKET];
-  volatile struct bucket_s* next;
+#endif
+  struct bucket_s* next;
 } bucket_t;
 
 //#if __GNUC__ > 4 && __GNUC_MINOR__ > 4
