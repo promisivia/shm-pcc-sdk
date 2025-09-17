@@ -2,7 +2,7 @@
 #define SHM_DS_UTILS_H
 
 /* Use CXL memory */
-#define USE_CXL
+
 // #define USE_DISTRI_CXL
 
 /* Assume No CC support */
@@ -11,10 +11,17 @@
 // #define OPT_NO_CC
 
 #ifdef NO_CC
-#define BYPASS_CACHE_DEFAULT (true)
-#define QUEUE_SIM_CAS
-#else
-#define BYPASS_CACHE_DEFAULT (false)
+    #define BYPASS_CACHE_DEFAULT (true)
+    #ifndef QUEUE_SIM_CAS
+        #define QUEUE_SIM_CAS
+    #endif
+    #define USE_CXL
+    #else
+    #define BYPASS_CACHE_DEFAULT (false)
+    #ifdef USE_MSG_QUEUE
+        #define QUEUE_SIM_CAS
+        #define USE_CXL
+    #endif
 #endif
 
 /* Memory allocation */

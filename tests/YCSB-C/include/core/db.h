@@ -11,8 +11,10 @@
 
 #include <string>
 #include <vector>
+#include <atomic>
 
 #include "core/db_config.h"
+#include "core/utils.h"
 #include "db/thread_pool.h"
 
 namespace ycsbc {
@@ -73,12 +75,16 @@ class DB {
   }
 
   template <typename Func, typename... Args>
-  int AsyncExecute(Func func, int &finish, int &result, Args &&...args) {
-    auto task = [this, &finish, &result, func, args...]() mutable {
-      result = func(std::forward<Args>(args)...);
-      finish = true;
+  int AsyncExecute(Func func, std::atomic<int> &finish, int &result, Args &&...args) {
+    auto tmp_result = (std::remove_reference_t<decltype(result)>*)cacheable.malloc(sizeof(std::remove_reference_t<decltype(result)>));
+    auto task = [tmp_result, &finish, func, args...]() mutable {
+      *tmp_result = func(std::forward<Args>(args)...);
+      finish.store(1, std::memory_order_release);
     };
-    pool->enqueue(SimThreadInfo::dispatcher_thread_id, task);
+    result = *tmp_result;
+    cacheable.free(tmp_result);
+    // simulate 8 machine
+    pool->enqueue(SimThreadInfo::dispatcher_thread_id % (SimThreadInfo::worker_thread_count / 8), task);
     return DB::kOK;
   }
 
@@ -108,7 +114,7 @@ class DB {
         value);
   };
 
-  virtual int AsyncRead(uint64_t key, uint64_t &value, int &finish,
+  virtual int AsyncRead(uint64_t key, uint64_t &value, std::atomic<int> &finish,
                         int &result) {
     return AsyncExecute(
         [this](uint64_t k, uint64_t &v) { return ReadInternal(k, v); }, finish,
@@ -165,7 +171,7 @@ class DB {
         value);
   };
 
-  virtual int AsyncUpdate(uint64_t key, uint64_t value, int &finish,
+  virtual int AsyncUpdate(uint64_t key, uint64_t value, std::atomic<int> &finish,
                           int &result) {
     return AsyncExecute(
         [this](uint64_t k, uint64_t v) { return UpdateInternal(k, v); }, finish,
@@ -203,7 +209,7 @@ class DB {
         value);
   };
 
-  virtual int AsyncInsert(uint64_t key, uint64_t value, int &finish,
+  virtual int AsyncInsert(uint64_t key, uint64_t value, std::atomic<int> &finish,
                           int &result) {
     return AsyncExecute(
         [this](uint64_t k, uint64_t v) { return InsertInternal(k, v); }, finish,
@@ -235,7 +241,7 @@ class DB {
     return SyncExecute([this](uint64_t k) { return DeleteInternal(k); }, key);
   };
 
-  virtual int AsyncDelete(uint64_t key, int &finish, int &result) {
+  virtual int AsyncDelete(uint64_t key, std::atomic<int> &finish, int &result) {
     return AsyncExecute([this](uint64_t k) { return DeleteInternal(k); },
                         finish, result, key);
   }

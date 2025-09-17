@@ -158,6 +158,8 @@ class MPMCQueue {
    */
   bool empty() const { return head.load() == tail.load(); }
 
+  size_t size() const { return tail.load() - head.load(); }
+
  private:
   size_t capacity;
   size_t mask;

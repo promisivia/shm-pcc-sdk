@@ -212,7 +212,7 @@ case $MODE in
 	thread_nums=(144)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloada_zipfian_1b.spec"
+		run_ycsbc "workloada_zipfian.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"
@@ -227,9 +227,11 @@ case $MODE in
 	# SERVER_THREADS_N=24
 	DB_TYPE="sherman"
 	workloads=(
-		"workloada_zipfian.spec" 
+		"workloada_zipfian_100m.spec" 
+		"workloadb_zipfian_100m.spec" 
+		"workloadc_zipfian_100m.spec"
 	)
-	thread_nums=(120)
+	thread_nums=(144)
 	for workload in "${workloads[@]}"; do
 		for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
@@ -261,7 +263,7 @@ case $MODE in
 		"workloadc_zipfian.spec" 
 		"workloadh_zipfian.spec"
 	)
-	SERVER_THREADS_N=48
+	SERVER_THREADS_N=144
   DB_TYPE="clevelhash"
 	for workload in "${workloads[@]}"; do
 		run_ycsbc $workload
@@ -307,11 +309,12 @@ case $MODE in
 "server_thread_scale_test")
   type=$CONFIG_TYPE
   workloads=(
-	"workloada_zipfian.spec" 
-	"workloadb_zipfian.spec" "workloadc_zipfian.spec" 
+	"workloada_zipfian_100m.spec"
+	"workloadb_zipfian_100m.spec"
+	"workloadc_zipfian_100m.spec"
 	# "workloadh_zipfian.spec"
 	)
-	thread_nums=(12 24 36 48 60 72 84 96 108 120 132 144)
+	thread_nums=(24 48 72 96 120 144)
   for workload in "${workloads[@]}"; do
     for thread_num in "${thread_nums[@]}"; do
       SERVER_THREADS_N=$thread_num
@@ -335,14 +338,12 @@ case $MODE in
   type=$CONFIG_TYPE
   DB_TYPE="clevelhash"
     workloads=(
-	"workloada_zipfian_1b.spec" 
-	"workloadb_zipfian_1b.spec" 
-	"workloadc_zipfian_1b.spec" 
+	"workloada_zipfian_100m.spec" 
+	"workloadb_zipfian_100m.spec" 
+	"workloadc_zipfian_100m.spec" 
 	# "workloadh_zipfian.spec"
 	)
-	# thread_nums=(48 )
-	thread_nums=(12 24 36 48 60 72 84 96 108 120 132 144)
-	# thread_nums=(1)
+	thread_nums=(24 48 72 96 120 144)
   for workload in "${workloads[@]}"; do
     for thread_num in "${thread_nums[@]}"; do
       SERVER_THREADS_N=$thread_num

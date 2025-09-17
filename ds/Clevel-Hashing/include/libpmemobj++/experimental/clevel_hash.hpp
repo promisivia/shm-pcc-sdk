@@ -1335,7 +1335,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
       for (size_type j = 0; j < assoc_num; j++) {
         KV_entry_ptr_s tmp(s_b.slots[j]);
         if (tmp.partial(true) == partial && tmp.addr(true) != nullptr) {
-          if (key_equal{}(tmp.addr(false)->first, key)) {
+          if (key_equal{}(tmp.addr(true)->first, key)) {
             uint64_t expected = tmp.p;
             bool ret = s_b.slots[j].p.compare_exchange_strong(expected, 0);
             if (ret) {
@@ -1636,7 +1636,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
           // bucket between the two candidata buckets in the new
           // level.
           KV_entry_ptr_s dst_tmp = dst_b1.slots[j];
-          if (dst_tmp.addr(false) == nullptr) {
+          if (dst_tmp.addr(true) == nullptr) {
             uint64_t expected = dst_tmp.p;
             if (dst_b1.slots[j].p.compare_exchange_strong(expected,
                                                           src_tmp.p)) {

@@ -118,7 +118,7 @@ public:
   T load(std::memory_order __m = std::memory_order_seq_cst,
          bool nt = true) const {
     if (nt) {
-      AtomicRequestQueue::pend_load_req(&value);
+      AtomicRequestQueue::pend_load_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     T ret = __atomic_load_n(&value, (int)__m);
     return ret;
@@ -127,7 +127,7 @@ public:
   void store(T newValue, std::memory_order __m = std::memory_order_seq_cst,
              bool nt = true) {
     if (nt) {
-      AtomicRequestQueue::pend_store_req(&value);
+      AtomicRequestQueue::pend_store_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     __atomic_store_n(&value, newValue, (int)__m);
   }
@@ -138,7 +138,7 @@ public:
     T old_value;
     old_value = __atomic_fetch_add(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -147,7 +147,7 @@ public:
     T old_value;
     old_value = __atomic_fetch_sub(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -156,7 +156,7 @@ public:
     T old_value;
     old_value = __atomic_fetch_xor(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -170,7 +170,7 @@ public:
         __atomic_compare_exchange_n(&value, &expected, desired, 0, (int)__m,
                                     (int)std::__cmpexch_failure_order(__m));
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return equal;
   }
@@ -208,7 +208,7 @@ public:
   T load(std::memory_order __m = std::memory_order_seq_cst,
          bool nt = true) const {
     if (nt) {
-      AtomicRequestQueue::pend_load_req(&value);
+      AtomicRequestQueue::pend_load_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     T ret = __atomic_load_n(&value, (int)__m);
     return ret;
@@ -218,7 +218,7 @@ public:
              bool nt = true) {
     __atomic_store_n(&value, newValue, (int)__m);
     if (nt) {
-      AtomicRequestQueue::pend_store_req(&value);
+      AtomicRequestQueue::pend_store_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
   }
 
@@ -226,7 +226,7 @@ public:
     T old_value;
     old_value = __atomic_add_fetch(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -235,7 +235,7 @@ public:
     T old_value;
     old_value = __atomic_fetch_sub(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -244,7 +244,7 @@ public:
     T old_value;
     old_value = __atomic_fetch_xor(&value, i, __ATOMIC_SEQ_CST);
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return old_value;
   }
@@ -257,7 +257,7 @@ public:
         __atomic_compare_exchange_n(&value, &expected, desired, 0, (int)__m,
                                     (int)std::__cmpexch_failure_order(__m));
     if (nt) {
-      AtomicRequestQueue::pend_cas_req(&value);
+      AtomicRequestQueue::pend_cas_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
     return equal;
   }

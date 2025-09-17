@@ -33,4 +33,18 @@ file(GLOB_RECURSE SOURCES
 # 添加静态库
 add_library(shm-lib STATIC ${SOURCES})
 
+# 链接 shm-lib 依赖的系统库
+find_library(MEMKIND_LIB memkind)
+if(NUMA_LIB)
+    target_link_libraries(shm-lib PRIVATE ${NUMA_LIB})
+else()
+    message(WARNING "NUMA library not found; shm-lib may fail to link/run on NUMA systems")
+endif()
+if(MEMKIND_LIB)
+    target_link_libraries(shm-lib PRIVATE ${MEMKIND_LIB})
+else()
+    message(WARNING "memkind library not found; shm-lib uses memkind APIs")
+endif()
+
+# 公开头文件目录
 target_include_directories(shm-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

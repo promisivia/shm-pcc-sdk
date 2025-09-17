@@ -22,7 +22,12 @@ task_ycsb_ccconfig_workload_threadcnt_debug() {
 task_ycsb_ccconfig_workload_threadcnt() {
     dir=./log/ycsb_ccconfig_workload_threadcnt
     mkdir -p $dir
-    configs=("cc_nocc_mq" "cc" "nocc_no_opt" "nocc")
+    configs=(
+        "cc"
+        "cc_nocc_mq"
+        "nocc_no_opt"
+        "nocc"
+    )
     for config in "${configs[@]}"; do
         ./build.sh "${config}"
         ./run_shm_ds.sh -mode=server_thread_scale_test -db=bwtree 2>&1 | tee $dir/${config}.log
@@ -35,7 +40,13 @@ task_real_ccconfig_workload() {
     dir=./log/real_ccconfig_workload
     mkdir -p $dir
     # configs=("nocc" "nocc_no_opt")
-    configs=("cc_nocc_mq" "cc" "nocc_part_opt" "nocc_no_opt" "nocc")
+    configs=(
+        "cc_nocc_mq"
+        "cc"
+        "nocc_part_opt"
+        "nocc_no_opt"
+        "nocc"
+    )
     # configs=("cc" "nocc")
     # configs=("nocc")
     for config in "${configs[@]}"; do
@@ -52,12 +63,12 @@ task_bwtree_breakdown() {
         "nocc_no_opt"
         "nocc_bwtree_part1"
         "nocc_bwtree_part2"
-        "nocc" 
+        "nocc"
         "cc"
     )
     for config in "${configs[@]}"; do
         ./build.sh "${config}"
-        ./run_shm_ds.sh -mode=bwtree_breakdown 2>&1 | tee $dir/${config}.log
+        ./run_shm_ds.sh -mode=bwtree_breakdown -db=bwtree 2>&1 | tee $dir/${config}.log
     done
 }
 
@@ -66,11 +77,11 @@ task_clevel_ccconfig_workload_threadcnt() {
     dir=./log/clevel_ccconfig_workload_threadcnt
     mkdir -p $dir
     configs=(
-        "cc" 
-        "cc_nocc_mq" 
-        "nocc" 
+        "cc"
+        "cc_nocc_mq"
+        "nocc"
         "nocc_no_opt"
-        )
+    )
     for config in "${configs[@]}"; do
         ./build.sh "${config}"
         ./run_shm_ds.sh -mode=clevel_server_thread_scale_test 2>&1 | tee $dir/${config}.log
@@ -83,10 +94,15 @@ task_clevel_real_ccconfig_workload() {
     dir=./log/real_clevel_ccconfig_workload
     mkdir -p $dir
     # configs=("nocc" "nocc_no_opt")
-    configs=("nocc" "nocc_no_opt" "cc" "cc_nocc_mq" )
+    configs=(
+        "nocc"
+        "nocc_no_opt"
+        "cc"
+        "cc_nocc_mq"
+    )
     for config in "${configs[@]}"; do
         ./build.sh "${config}"
-        ./run_shm_ds.sh -mode=clevel_run_real_workloads_comple 2>&1 | tee $dir/${config}.log
+        ./run_shm_ds.sh -mode=run_real_workloads -db=clevelhash 2>&1 | tee $dir/${config}.log
     done
 }
 
@@ -101,7 +117,7 @@ task_clevel_breakdown() {
     )
     for config in "${configs[@]}"; do
         ./build.sh "${config}"
-        ./run_shm_ds.sh -mode=clevel_breakdown 2>&1 | tee $dir/${config}.log
+        ./run_shm_ds.sh -mode=clevel_breakdown -db=clevelhash 2>&1 | tee $dir/${config}.log
     done
 }
 
@@ -210,8 +226,16 @@ task_imbalance_multi_db() {
 task_latency_overhead() {
     dir=./log/latency_overhead
     mkdir -p $dir
-    configs=("cc" "nocc")
-    db_types=("clht" "clevelhash" "bwtree" "btree_olc" "hot" "masstree" "radix_art_olc")
+    configs=("cc" "nocc_no_opt" "nocc")
+    db_types=(
+        "clht"
+        "clevelhash"
+        "bwtree"
+        "btree_olc"
+        "hot"
+        "masstree"
+        "radix_art_olc"
+    )
     for config in "${configs[@]}"; do
         for db_type in "${db_types[@]}"; do
             ./build.sh "${config}"
@@ -228,13 +252,13 @@ echo $PASSWORD | sudo -S ./prepare_env.sh
 # task_msg_queue
 # task_imbalance_multi_db
 # task_record_scale_test
+# task_real_ccconfig_workload
+# task_ycsb_ccconfig_workload_threadcnt
+# task_sherman_ccconfig_workload_threadcnt
+# task_ycsb_ccconfig_workload_threadcnt_debug
 # task_clevel_ccconfig_workload_threadcnt
 # task_clevel_real_ccconfig_workload
-# task_ycsb_ccconfig_workload_threadcnt
-# task_real_ccconfig_workload
 # task_clevel_breakdown
-# task_ycsb_ccconfig_workload_threadcnt_debug
-# task_sherman_ccconfig_workload_threadcnt
 # task_bwtree_breakdown
 # task_sherman_indivi
 # task_latency_overhead

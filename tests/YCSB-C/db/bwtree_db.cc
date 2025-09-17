@@ -307,7 +307,7 @@ void BwTreeDB::GetStats() {
   std::cerr << "Update Count: " << update_cnt.load() << " ";
   std::cerr << "Insert Count: " << insert_cnt.load() << std::endl;
   // std::cerr << "Average GetNode: " << tree->GetTime();
-  tree->reportTimers();
+  // tree->reportTimers();
 }
 
 int BwTreeDB::allocate() {

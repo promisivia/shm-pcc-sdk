@@ -28,7 +28,7 @@ bool InsertClient::DoInsert() {
 }
 
 #ifdef ASYNC_CLIENT
-int InsertClient::TransactionRead(Operation &op, int &finish, int &return_value, uint64_t& read_value) {
+int InsertClient::TransactionRead(Operation &op, std::atomic<int> &finish, int &return_value, uint64_t& read_value) {
   std::vector<DB::KVPair> result;
   int ret;
 #ifdef TRX_LATENCY
@@ -53,7 +53,7 @@ int InsertClient::TransactionRead(Operation &op, int &finish, int &return_value,
   return ret;
 }
 
-int InsertClient::TransactionReadModifyWrite(Operation &op, int &finish,
+int InsertClient::TransactionReadModifyWrite(Operation &op, std::atomic<int> &finish,
                                        int &return_value) {
   std::vector<DB::KVPair> result;
 #ifdef YCSB_KEY
@@ -71,7 +71,7 @@ int InsertClient::TransactionReadModifyWrite(Operation &op, int &finish,
 #endif
 }
 
-int InsertClient::TransactionScan(Operation &op, int &finish, int &return_value) {
+int InsertClient::TransactionScan(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret = 0;
 #ifdef USE_CONSISTENT_HASH
   uint32_t db_index = get_db(op.key);
@@ -92,7 +92,7 @@ int InsertClient::TransactionScan(Operation &op, int &finish, int &return_value)
   return ret;
 }
 
-int InsertClient::TransactionUpdate(Operation &op, int &finish, int &return_value) {
+int InsertClient::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
@@ -112,7 +112,7 @@ int InsertClient::TransactionUpdate(Operation &op, int &finish, int &return_valu
   return ret;
 }
 
-int InsertClient::TransactionInsert(Operation &op, int &finish, int &return_value) {
+int InsertClient::TransactionInsert(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
 #ifdef TRX_LATENCY
   TimerAverage timer("insert_latency");

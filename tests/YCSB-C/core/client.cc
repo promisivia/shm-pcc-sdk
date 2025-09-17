@@ -10,7 +10,7 @@ namespace ycsbc {
 int Client::Task(Operation &op) { return 0; }
 
 #ifdef ASYNC_CLIENT
-int Client::TransactionRead(Operation &op, int &finish, int &return_value, uint64_t& read_value) {
+int Client::TransactionRead(Operation &op, std::atomic<int> &finish, int &return_value, uint64_t& read_value) {
   std::vector<DB::KVPair> result;
   int ret;
 #ifdef TRX_LATENCY
@@ -35,7 +35,7 @@ int Client::TransactionRead(Operation &op, int &finish, int &return_value, uint6
   return ret;
 }
 
-int Client::TransactionReadModifyWrite(Operation &op, int &finish,
+int Client::TransactionReadModifyWrite(Operation &op, std::atomic<int> &finish,
                                        int &return_value) {
   std::vector<DB::KVPair> result;
 #ifdef YCSB_KEY
@@ -53,7 +53,7 @@ int Client::TransactionReadModifyWrite(Operation &op, int &finish,
 #endif
 }
 
-int Client::TransactionScan(Operation &op, int &finish, int &return_value) {
+int Client::TransactionScan(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret = 0;
 #ifdef USE_CONSISTENT_HASH
   uint32_t db_index = get_db(op.key);
@@ -74,7 +74,7 @@ int Client::TransactionScan(Operation &op, int &finish, int &return_value) {
   return ret;
 }
 
-int Client::TransactionUpdate(Operation &op, int &finish, int &return_value) {
+int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
@@ -94,7 +94,7 @@ int Client::TransactionUpdate(Operation &op, int &finish, int &return_value) {
   return ret;
 }
 
-int Client::TransactionInsert(Operation &op, int &finish, int &return_value) {
+int Client::TransactionInsert(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
 #ifdef TRX_LATENCY
   TimerAverage timer("insert_latency");

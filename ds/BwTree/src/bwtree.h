@@ -28,6 +28,9 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+
+// Include memory optimization configuration
+#include <memkind.h>
 #include <thread>
 #include <unordered_set>
 // offsetof() is defined here
@@ -58,7 +61,7 @@
  * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
  * 默认关闭，如需开启请在编译命令或此处取消注释
  */
-#define BWTREE_AUTODUMP
+// #define BWTREE_AUTODUMP
 
 #ifdef BWTREE_PELOTON
 
@@ -229,6 +232,14 @@ class BwTreeBase {
 
 #ifdef OPT_ROOT_READ
   nt<uint64_t> global_root_id;
+#endif
+
+#ifdef ENABLE_ROOT_CACHE
+  // Thread-local root node caching (alternative to OPT_ROOT_READ)
+  static thread_local uint64_t tl_cached_root_id;
+  static thread_local const void* tl_cached_root_ptr;
+  static thread_local uint64_t tl_cache_version;
+  std::atomic<uint64_t> global_cache_version{0};
 #endif
 
 protected:
@@ -2108,8 +2119,7 @@ class BwTree : public BwTreeBase {
         return meta_p;
       }
 #ifdef USE_CXL
-      char *new_chunk;
-      cacheable.clalign((void **)&new_chunk, CHUNK_SIZE);
+      char *new_chunk = (char *)cacheable.malloc(CHUNK_SIZE);
 #else
       char *new_chunk = new char[CHUNK_SIZE];
 #endif
@@ -2132,6 +2142,9 @@ class BwTree : public BwTreeBase {
       if (ret == true) {
         return new_meta_base;
       }
+
+      // Note: No need to revert memory tracking here since we didn't track
+      // chunk allocation at this level - it's handled at ElasticNode level
 
       // Note that here we call destructor manually and then delete the char[]
       // to complete the entire sequence which should be done by the compiler
@@ -2196,6 +2209,9 @@ class BwTree : public BwTreeBase {
       while (meta_p != nullptr) {
         // Save the next pointer to traverse to it later
         AllocationMeta *next_p = meta_p->next.load();
+
+        // Note: Memory tracking is handled at ElasticNode level
+        // since AllocationMeta doesn't have access to the tree instance
 
         // 1. Manually call destructor
         // 2. Delete it as a char[]
@@ -2481,16 +2497,24 @@ class BwTree : public BwTreeBase {
       // basic template + ElementType element size * (node size) + CHUNK_SIZE
       // Note: do not make it constant since it is going to be modified
       // after being returned
+      size_t allocation_size = sizeof(ElasticNode) + size * sizeof(ElementType) +
+                               AllocationMeta::CHUNK_SIZE;
 #ifdef USE_CXL
-      char *alloc_base = (char *)cacheable.malloc(sizeof(ElasticNode) +
-                                                 size * sizeof(ElementType) +
-                                                 AllocationMeta::CHUNK_SIZE);
+      char *alloc_base = (char *)cacheable.malloc(allocation_size);
+      // static uint64_t allocated_bytes = 0;
+      // static uint64_t count = 0;
+      // allocated_bytes += allocation_size;
+      // if (count % 10000 == 0) {
+      //   printf("elastic node allocated bytes: %zu MB\n", allocated_bytes / 1024 / 1024);
+      // }
+      // count++;
 #else
-      char *alloc_base =
-          new char[sizeof(ElasticNode) + size * sizeof(ElementType) +
-                   AllocationMeta::CHUNK_SIZE];
+      char *alloc_base = new char[allocation_size];
 #endif
       assert(alloc_base != nullptr);
+
+      // Note: Memory tracking for ElasticNode will be handled
+      // at a higher level to avoid complexity with static function access
 
       // Initialize the AllocationMeta - tail points to the first byte inside
       // class ElasticNode; limit points to the first byte after class
@@ -3449,6 +3473,12 @@ class BwTree : public BwTreeBase {
     return true;
 #else
     ret = root_id.compare_exchange_strong(old_root_node_id, new_root_node_id);
+#ifdef ENABLE_ROOT_CACHE
+    if (ret) {
+      // Invalidate thread-local root cache when root changes
+      InvalidateRootCache();
+    }
+#endif
 #endif
 
 #ifdef BWTREE_AUTODUMP
@@ -6710,8 +6740,15 @@ class BwTree : public BwTreeBase {
             // Note that the remove node must not be created on inner_node_p
             // since inner_node_p might be destroyed before remove node is
             // destroyed since they are both put into the GC chain
+#ifdef USE_CXL
+            const InnerRemoveNode *fake_remove_node_p =
+                static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+            new (const_cast<InnerRemoveNode*>(fake_remove_node_p))
+                InnerRemoveNode{new_root_id, inner_node_p};
+#else
             const InnerRemoveNode *fake_remove_node_p =
                 new InnerRemoveNode{new_root_id, inner_node_p};
+#endif
 
             // Put the remove node into garbage chain, because
             // we cannot call InvalidateNodeID() here
@@ -7086,8 +7123,15 @@ class BwTree : public BwTreeBase {
           // since they are both put into the GC chain, it is possible
           // for new_leaf_node_p to be deleted first and then remove node
           // is deleted
+#ifdef USE_CXL
+          const LeafRemoveNode *fake_remove_node_p =
+              static_cast<LeafRemoveNode*>(cacheable.malloc(sizeof(LeafRemoveNode)));
+          new (const_cast<LeafRemoveNode*>(fake_remove_node_p))
+              LeafRemoveNode{new_node_id, new_leaf_node_p};
+#else
           const LeafRemoveNode *fake_remove_node_p =
               new LeafRemoveNode{new_node_id, new_leaf_node_p};
+#endif
 
           // Must put both of them into GC chain since RemoveNode
           // will not be followed by GC thread
@@ -7136,8 +7180,15 @@ class BwTree : public BwTreeBase {
           return;
         }
 
+#ifdef USE_CXL
+        const LeafRemoveNode *remove_node_p =
+            static_cast<LeafRemoveNode*>(cacheable.malloc(sizeof(LeafRemoveNode)));
+        new (const_cast<LeafRemoveNode*>(remove_node_p))
+            LeafRemoveNode{node_id, node_p};
+#else
         const LeafRemoveNode *remove_node_p =
             new LeafRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7245,8 +7296,15 @@ class BwTree : public BwTreeBase {
           // Note that this remove node should be created on existing node
           // rather than on new_inner_node_p, since new_inner_node_p may
           // be destroyed before fake_remove_node_p is destroyed
+#ifdef USE_CXL
+          const InnerRemoveNode *fake_remove_node_p =
+              static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+          new (const_cast<InnerRemoveNode*>(fake_remove_node_p))
+              InnerRemoveNode{new_node_id, new_inner_node_p};
+#else
           const InnerRemoveNode *fake_remove_node_p =
               new InnerRemoveNode{new_node_id, new_inner_node_p};
+#endif
 
           epoch_manager.AddGarbageNode(fake_remove_node_p);
           epoch_manager.AddGarbageNode(new_inner_node_p);
@@ -7303,8 +7361,15 @@ class BwTree : public BwTreeBase {
           return;
         }
 
+#ifdef USE_CXL
+        const InnerRemoveNode *remove_node_p =
+            static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+        new (const_cast<InnerRemoveNode*>(remove_node_p))
+            InnerRemoveNode{node_id, node_p};
+#else
         const InnerRemoveNode *remove_node_p =
             new InnerRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7403,7 +7468,12 @@ class BwTree : public BwTreeBase {
     *abort_child_node_p_p = parent_node_p;
     *parent_node_id_p = parent_node_id;
 
+#ifdef USE_CXL
+    InnerAbortNode *abort_node_p = static_cast<InnerAbortNode*>(cacheable.malloc(sizeof(InnerAbortNode)));
+    new (abort_node_p) InnerAbortNode{parent_node_p};
+#else
     InnerAbortNode *abort_node_p = new InnerAbortNode{parent_node_p};
+#endif
 
     bool ret =
         InstallNodeToReplace(parent_node_id, abort_node_p, parent_node_p);
@@ -8390,7 +8460,11 @@ retry_read:
     BwTree *tree_p;
 
     // Garbage collection interval (milliseconds)
-    constexpr static int GC_INTERVAL = 50;
+#ifdef GC_INTERVAL_MS
+    constexpr static int GC_INTERVAL = GC_INTERVAL_MS;
+#else
+    constexpr static int GC_INTERVAL = 50;  // Default interval
+#endif
 
     /*
      * struct GarbageNode - A linked list of garbages
@@ -8472,7 +8546,12 @@ retry_read:
      * might take a long time
      */
     EpochManager(BwTree *p_tree_p) : tree_p{p_tree_p} {
+#ifdef USE_CXL
+      current_epoch_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (current_epoch_p) EpochNode{};
+#else
       current_epoch_p = new EpochNode{};
+#endif
 
       // These two are atomic variables but we could
       // simply assign to them
@@ -8596,7 +8675,12 @@ retry_read:
     void CreateNewEpoch() {
       bwt_printf("Creating new epoch...\n");
 
+#ifdef USE_CXL
+      EpochNode *epoch_node_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (epoch_node_p) EpochNode{};
+#else
       EpochNode *epoch_node_p = new EpochNode{};
+#endif
 
       epoch_node_p->active_thread_count = 0;
       epoch_node_p->garbage_list_p = nullptr;
@@ -8639,7 +8723,12 @@ retry_read:
       EpochNode *epoch_p = current_epoch_p;
 
       // These two could be predetermined
+#ifdef USE_CXL
+      GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+      new (garbage_node_p) GarbageNode{};
+#else
       GarbageNode *garbage_node_p = new GarbageNode;
+#endif
       garbage_node_p->node_p = node_p;
 
       garbage_node_p->next_p = epoch_p->garbage_list_p.load();
@@ -8838,7 +8927,12 @@ retry_read:
             // This recycles node ID
             tree_p->InvalidateNodeID(((LeafRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            const_cast<LeafRemoveNode*>(static_cast<const LeafRemoveNode*>(node_p))->~LeafRemoveNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((LeafRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -8907,7 +9001,12 @@ retry_read:
             // see the remove node exit before cleaning the NodeID
             tree_p->InvalidateNodeID(((InnerRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            const_cast<InnerRemoveNode*>(static_cast<const InnerRemoveNode*>(node_p))->~InnerRemoveNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((InnerRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -8931,7 +9030,12 @@ retry_read:
             // wrong type after the node has been put into the
             // list (if we delete it directly then this will be
             // a problem)
+#ifdef USE_CXL
+            const_cast<InnerAbortNode*>(static_cast<const InnerAbortNode*>(node_p))->~InnerAbortNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((InnerAbortNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9023,14 +9127,25 @@ retry_read:
 
           // This invalidates any further reference to its
           // members (so we saved next pointer above)
+#ifdef USE_CXL
+          garbage_node_p->~GarbageNode();
+          cacheable.free(const_cast<void*>(static_cast<const void*>(garbage_node_p)));
+#else
           delete garbage_node_p;
+#endif
         }  // for
 
         // First need to save this in order to delete current node
         // safely
         EpochNode *next_epoch_node_p = head_epoch_p->next_p;
 
+
+#ifdef USE_CXL
+        head_epoch_p->~EpochNode();
+        cacheable.free(head_epoch_p);
+#else
         delete head_epoch_p;
+#endif
 
 #ifdef BWTREE_DEBUG
         epoch_freed++;
@@ -9954,8 +10069,13 @@ retry_read:
    * do not have to worry about thread identity issues
    */
   void AddGarbageNode(const BaseNode *node_p) {
+#ifdef USE_CXL
+    GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+    new (garbage_node_p) GarbageNode{GetGlobalEpoch(), (void *)(node_p)};
+#else
     GarbageNode *garbage_node_p =
         new GarbageNode{GetGlobalEpoch(), (void *)(node_p)};
+#endif
     assert(garbage_node_p != nullptr);
 
     // Link this new node to the end of the linked list
@@ -9997,8 +10117,28 @@ retry_read:
 #if defined(NO_CC) && defined(OPT_GC)
     uint64_t min_epoch = SummarizeGCEpoch2(thread_id) - 1;
 #else
-    uint64_t min_epoch = SummarizeGCEpoch();
+    uint64_t min_epoch = SummarizeGCEpoch() - 1;
 #endif
+
+    // Get current epoch for analysis
+    uint64_t current_epoch = GetGlobalEpoch();
+    uint64_t epoch_gap = current_epoch - min_epoch;
+
+    // Force epoch advancement if gap is too small (helps with GC efficiency)
+    if (epoch_gap < 2) {
+        IncreaseEpoch();
+        current_epoch = GetGlobalEpoch();
+        // Recalculate min_epoch after advancement
+#if defined(NO_CC) && defined(OPT_GC)
+        min_epoch = SummarizeGCEpoch2(thread_id) - 1;
+#else
+        min_epoch = SummarizeGCEpoch() - 1;
+#endif
+        epoch_gap = current_epoch - min_epoch;
+    }
+    // Original single-node processing
+    ProcessGarbageNodes(thread_id, min_epoch);
+
     // This is the pointer we use to perform GC
     // Note that we only fetch the metadata using the current thread-local id
     GarbageNode *header_p = &GetGCMetaData(thread_id)->header;
@@ -10014,7 +10154,12 @@ retry_read:
       // Then free memory
       epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
 
+#ifdef USE_CXL
+      first_p->~GarbageNode();
+      cacheable.free(first_p);
+#else
       delete first_p;
+#endif
       assert(GetGCMetaData(thread_id)->node_count != 0UL);
       GetGCMetaData(thread_id)->node_count--;
 
@@ -10028,6 +10173,42 @@ retry_read:
     }
 
     return;
+  }
+
+  /*
+   * ProcessGarbageNodes() - Original garbage processing logic
+   */
+  void ProcessGarbageNodes(int thread_id, uint64_t min_epoch) {
+    GarbageNode *header_p = &GetGCMetaData(thread_id)->header;
+    GarbageNode *first_p = header_p->next_p;
+
+    // Then traverse the linked list
+    // Only reclaim memory when the deleted epoch < min epoch
+    while (first_p != nullptr && first_p->delete_epoch < min_epoch) {
+      // First unlink the current node from the linked list
+      // This could set it to nullptr
+      header_p->next_p = first_p->next_p;
+
+      // Then free memory
+      epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
+
+#ifdef USE_CXL
+      first_p->~GarbageNode();
+      cacheable.free(first_p);
+#else
+      delete first_p;
+#endif
+      assert(GetGCMetaData(thread_id)->node_count != 0UL);
+      GetGCMetaData(thread_id)->node_count--;
+
+      first_p = header_p->next_p;
+    }
+
+    // If we have freed all nodes in the linked list we should
+    // reset last_p to the header
+    if (first_p == nullptr) {
+      GetGCMetaData(thread_id)->last_p = header_p;
+    }
   }
 
 #ifdef BWTREE_AUTODUMP

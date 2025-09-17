@@ -4,6 +4,7 @@
 
 #include "core/db.h"
 #include "utils/config.h"
+#include "shm/cxl_type.h"
 #ifdef LOCAL_NO_CC
 // #ifdef NO_CC
 #include "libpmemobj++/experimental/clevel_hash.hpp"
@@ -36,9 +37,17 @@ public:
 
   int DeleteInternal(uint64_t key) override;
 
+  int Read(uint64_t key, uint64_t &value) override;
+
+  int Update(uint64_t key, uint64_t value) override;
+
+  int Insert(uint64_t key, uint64_t value) override;
+
+  int Delete(uint64_t key) override;
+
   // void Init() override;
 
-  // void Close() override;
+  void Close() override;
 
   // void InitStats() override;
 
@@ -47,6 +56,14 @@ public:
   CLevelHashDB(int thread_num);
 
   ~CLevelHashDB();
+
+  int ThreadInit() override;
+  void ThreadClose(int thread_id) override;
+  int PoolThreadInit() override;
+  void PoolThreadClose(int thread_id) override;
+
+  int allocate();
+  void release(int id);
 
 private:
 // #ifdef NO_CC
@@ -63,6 +80,7 @@ private:
   nvobj::pool<root> pop;
 #endif
   int thread_num;
+  cxl_vector<std::atomic<uint8_t>> bits;
 };
 
 } // namespace ycsbc

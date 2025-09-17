@@ -31,7 +31,7 @@ class nt_pointer {
   }
 
   T *load(std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
           bool nt = true
 #else
           bool nt = false
@@ -44,7 +44,7 @@ class nt_pointer {
   }
 
   void store(T *value, std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
              bool nt = true
 #else
              bool nt = false
@@ -61,7 +61,7 @@ class nt_pointer {
   bool compare_exchange_strong(
       T *expected, T *desired,
       std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
       bool nt = true
 #else
       bool nt = false
@@ -153,7 +153,7 @@ class nt_pointer<T[]> {
   void flush_elements(size_t size) { clwb((void *)&ptr, sizeof(T) * size); }
 
   T *load(std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
           bool nt = true
 #else
           bool nt = false
@@ -167,7 +167,7 @@ class nt_pointer<T[]> {
   }
 
   void store(T *newValue,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
              bool nt = true
 #else
              bool nt = false
@@ -183,7 +183,7 @@ class nt_pointer<T[]> {
   bool compare_exchange_strong(
       T *expected, T *desired,
       std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
       bool nt = true
 #else
       bool nt = false

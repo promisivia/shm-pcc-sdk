@@ -11,6 +11,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <atomic>
 
 #include "core/consistent_hash.h"
 #include "core_workload.h"
@@ -43,7 +44,7 @@ class InsertClient {
   virtual bool DoInsert();
   // virtual bool DoInsertNumKey();
 #ifdef ASYNC_CLIENT
-  virtual bool DoTransaction(Operation& op, int& finish, int& result, uint64_t& read_value){
+  virtual bool DoTransaction(Operation& op, std::atomic<int>& finish, int& result, uint64_t& read_value){
     int status = -1;
     switch (op.type) {
       case READ:
@@ -99,12 +100,12 @@ class InsertClient {
 
  protected:
 #ifdef ASYNC_CLIENT
-  virtual int TransactionRead(Operation &op, int &finish, int &result, uint64_t& read_value);
-  virtual int TransactionReadModifyWrite(Operation &op, int &finish,
+  virtual int TransactionRead(Operation &op, std::atomic<int> &finish, int &result, uint64_t& read_value);
+  virtual int TransactionReadModifyWrite(Operation &op, std::atomic<int> &finish,
                                          int &result);
-  virtual int TransactionScan(Operation &op, int &finish, int &result);
-  virtual int TransactionUpdate(Operation &op, int &finish, int &result);
-  virtual int TransactionInsert(Operation &op, int &finish, int &result);
+  virtual int TransactionScan(Operation &op, std::atomic<int> &finish, int &result);
+  virtual int TransactionUpdate(Operation &op, std::atomic<int> &finish, int &result);
+  virtual int TransactionInsert(Operation &op, std::atomic<int> &finish, int &result);
 #else
   virtual int TransactionRead(Operation &op);
   virtual int TransactionReadModifyWrite(Operation &op);

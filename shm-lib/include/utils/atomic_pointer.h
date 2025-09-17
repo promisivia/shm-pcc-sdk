@@ -24,6 +24,8 @@ template <typename T> struct is_nt_pointer<nt_pointer<T>> : std::true_type {};
 #ifdef NT_SIM
 template <typename T> class nt_pointer {
 public:
+  // ~nt_pointer() { free(); }
+
   nt_pointer(T *init = nullptr) {
     // cache_value = new T *[SimThreadInfo::worker_machine_count]();
     // cache_available = new char[SimThreadInfo::worker_machine_count]();
@@ -159,7 +161,8 @@ private:
 
 template <typename T> class nt_pointer<T[]> {
 public:
-  // nt_pointer() = delete;
+  // ~nt_pointer() { free(); }
+
   nt_pointer(T *init = nullptr) {
     cache_value.resize(SimThreadInfo::worker_machine_count);
     cache_available.resize(SimThreadInfo::worker_machine_count);
@@ -242,12 +245,12 @@ public:
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
-    return *ptr;
+    return *this;
   }
 
   nt_pointer &operator=(const nt_pointer &rhs) {
     store(rhs.load(memory_order_seq_cst, false));
-    return *ptr;
+    return *this;
   }
 
   bool operator==(const nt_pointer &rhs) {
@@ -266,17 +269,17 @@ private:
 #else
 template <typename T> class nt_pointer {
 public:
+  // ~nt_pointer() { free(); }
+
   nt_pointer(T *init = nullptr) { store(init); }
   nt_pointer(const nt_pointer &other) { store(other.load()); }
-
-  ~nt_pointer() { free(); }
 
   template <typename... Args> void allocate(Args &&...args) {
     store(new T(std::forward<Args>(args)...));
   }
 
   T *load(std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
           bool nt = true
 #else
           bool nt = false
@@ -289,7 +292,7 @@ public:
   }
 
   void store(T *value, std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
              bool nt = true
 #else
              bool nt = false
@@ -306,7 +309,7 @@ public:
   bool
   compare_exchange_strong(T *expected, T *desired,
                           std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
                           bool nt = true
 #else
                           bool nt = false
@@ -371,6 +374,8 @@ private:
 
 template <typename T> class nt_pointer<T[]> {
 public:
+  // ~nt_pointer() { free(); }
+
   nt_pointer(T *init = nullptr) { store(init); }
   nt_pointer(const nt_pointer &other) { store(other.load()); }
 
@@ -391,7 +396,7 @@ public:
   void flush_elements(size_t size) { clflush((void *)&ptr, sizeof(T) * size); }
 
   T *load(std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
           bool nt = true
 #else
           bool nt = false
@@ -404,7 +409,7 @@ public:
   }
 
   void store(T *newValue,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
              bool nt = true
 #else
              bool nt = false
@@ -419,7 +424,7 @@ public:
   bool
   compare_exchange_strong(T *expected, T *desired,
                           std::memory_order __m = std::memory_order_seq_cst,
-#ifdef NO_CC
+#if defined(NO_CC) || defined(USE_NO_CC_QUEUE)
                           bool nt = true
 #else
                           bool nt = false
@@ -457,14 +462,14 @@ public:
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
-    return *ptr;
+    return *this;
   }
 
   nt_pointer &operator=(const nt_pointer &rhs) {
     store(rhs.load(memory_order_seq_cst, false));
-    return *ptr;
+    return *this;
   }
-
+  
   bool operator==(const nt_pointer &rhs) {
     return load(memory_order_seq_cst, false) ==
            rhs.load(memory_order_seq_cst, memory_order_seq_cst, false);

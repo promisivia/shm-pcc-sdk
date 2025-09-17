@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <vector>
+#include <chrono>
 
 #include "connection/establish.h"
 #include "core/client.h"
@@ -165,11 +166,13 @@ private:
 #ifdef ASYNC_CLIENT
     // Store the value of read for check
     std::vector<uint64_t> read_value(virtual_clients);
-    std::vector<int> finish(virtual_clients, 1);
+    std::vector<std::atomic<int>> finish(virtual_clients);
+    std::vector<std::atomic<int>> finish_flag(10000000);
+    for (int i = 0; i < virtual_clients; ++i) finish[i].store(1, std::memory_order_relaxed);
     std::vector<int> result(virtual_clients);
     int last_pos = arg->sim_thread_id % virtual_clients;
     for (size_t i = 0; i < ops.size(); i++) {
-      while (!finish[last_pos]) {
+      while (!finish[last_pos].load(std::memory_order_acquire)) {
         last_pos = (last_pos + 1) % virtual_clients;
       }
 #ifdef INT_KEY_ADDR
@@ -185,13 +188,19 @@ private:
       }
       read_value[last_pos] = 0;
 #endif
-      finish[last_pos] = false;
-      oks += client.DoTransaction(ops[i], finish[last_pos], result[last_pos],
+      int pos = 0;
+      finish_flag[pos].store(0, std::memory_order_relaxed);
+      oks += client.DoTransaction(ops[i], finish_flag[pos], result[last_pos],
                                   read_value[last_pos]);
-    }
-    for (int i = 0; i < virtual_clients; ++i) {
-      while (!finish[i])
-        ;
+      #ifdef USE_MWAIT
+      _umonitor(&finish_flag[pos]);
+      while (finish_flag[pos].load(std::memory_order_acquire) == 0) {
+        _umwait(0, 1);
+      }
+      #else
+      while (finish_flag[pos].load(std::memory_order_acquire) == 0);
+      #endif
+      assert(finish_flag[pos].load(std::memory_order_acquire) == 1);
     }
 #else
     for (size_t i = 0; i < ops.size(); i++) {

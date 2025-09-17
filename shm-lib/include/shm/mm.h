@@ -57,8 +57,9 @@ public:
   int clalign(void **memptr, size_t size);
   void free(void *ptr);
 
-private:
   memkind_t memkind_pool;
+private:
+  
   void *base;
   size_t size;
   SystemMemoryMmapper *allocator;

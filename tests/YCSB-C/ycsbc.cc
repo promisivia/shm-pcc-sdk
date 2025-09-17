@@ -113,7 +113,11 @@ void master_process(utils::Properties &props) {
                         SimThreadInfo::worker_machine_count, total_ops);
   auto end = std::chrono::steady_clock::now();
   std::cerr << "LoadData time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
-  std::cerr << "LoadData throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ops/ms" << std::endl;
+  if (total_ops > 0) {
+    std::cerr << "LoadData throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ops/ms" << std::endl;
+  } else {
+    std::cerr << "LoadData throughput: 0 ops/ms" << std::endl;
+  }
   
   auto machine_list =stoi(props.GetProperty("machinenum", "1")) == 1 ? std::vector<std::string>() :
       FollowerManager::split_machines(props.GetProperty("follower_list"));
@@ -141,8 +145,10 @@ void master_process(utils::Properties &props) {
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
             << "throughput\t" << (sum / duration / 1000000) << '\n'
             << "total operations\t" << sum << '\n';
-  // TimerAverage::Print("read_latency", std::cerr);
-  // TimerAverage::Print("update_latency", std::cerr);
+#ifdef TRX_LATENCY
+  TimerAverage::Print("read_latency", std::cerr);
+  TimerAverage::Print("update_latency", std::cerr);
+#endif
 
   PrintStatistics();
 
@@ -158,7 +164,7 @@ void master_process(utils::Properties &props) {
     ycsbc::DB *db = (*dbs)[i];
 #ifdef USE_CXL
     db->~DB();
-    cacheable.free(db);
+    // cacheable.free(db);
 #else
     delete db;
 #endif
