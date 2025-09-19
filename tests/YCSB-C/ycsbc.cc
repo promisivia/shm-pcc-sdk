@@ -112,11 +112,11 @@ void master_process(utils::Properties &props) {
   load_manager.LoadData(SimThreadInfo::dispatcher_thread_count,
                         SimThreadInfo::worker_machine_count, total_ops);
   auto end = std::chrono::steady_clock::now();
-  std::cerr << "LoadData time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
+  // std::cerr << "LoadData time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << "ms" << std::endl;
   if (total_ops > 0) {
-    std::cerr << "LoadData throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ops/ms" << std::endl;
+    std::cerr << "Load throughput: " << total_ops / std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " Kops/s" << std::endl;
   } else {
-    std::cerr << "LoadData throughput: 0 ops/ms" << std::endl;
+    std::cerr << "Load throughput: 0 ops/ms" << std::endl;
   }
   
   auto machine_list =stoi(props.GetProperty("machinenum", "1")) == 1 ? std::vector<std::string>() :
@@ -139,11 +139,11 @@ void master_process(utils::Properties &props) {
                     ? props["workloadname"]
                     : props["workload_file"])
             << std::endl;
-  print_define();
+  // print_define();
   std::cerr << "dispatcher\t" << SimThreadInfo::dispatcher_thread_count << '\n'
             << "worker\t" << SimThreadInfo::worker_thread_count << '\n'
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
-            << "throughput\t" << (sum / duration / 1000000) << '\n'
+            << "throughput\t" << "\033[31m" << (sum / duration / 1000000) << " Mops/s" << "\033[0m\n"
             << "total operations\t" << sum << '\n';
 #ifdef TRX_LATENCY
   TimerAverage::Print("read_latency", std::cerr);

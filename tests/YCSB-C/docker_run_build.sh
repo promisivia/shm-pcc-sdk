@@ -41,22 +41,23 @@ fi
 # 准备运行命令
 ROOT_DIR=$(pwd)/../..
 # 执行构建或启动容器
-if [[ -n "$BUILD_ARGS" ]]; then
-    echo "在容器中构建: $BUILD_ARGS"
+# if [[ -n "$BUILD_ARGS" ]]; then
+#     echo "在容器中构建: $BUILD_ARGS"
+#     docker run --rm -it \
+#         -v "$(pwd)/../..":/workspace \
+#         -w /workspace/tests/YCSB-C \
+#         $IMAGE \
+#         bash -c "chmod +x ./build.sh && ./build.sh $BUILD_ARGS"
+#     echo "构建完成！检查 $(pwd) 目录下的构建结果"
+# else
+    echo "启动交互式容器"
     docker run --rm -it \
         -v "$(pwd)/../..":/workspace \
         -w /workspace/tests/YCSB-C \
+        -e LD_LIBRARY_PATH="/usr/lib:/usr/local/lib" \
         $IMAGE \
-        bash -c "chmod +x ./build.sh && ./build.sh $BUILD_ARGS"
-    echo "构建完成！检查 $(pwd) 目录下的构建结果"
-else
-    echo "启动交互式容器"
-    docker run --rm -it \
-        -v "$(ROOT_DIR)":/workspace \
-        -w /workspace/tests/YCSB-C \
-        $IMAGE \
-        bash
-fi
+        bash -c "chmod +x ./fix_libs.sh && ./fix_libs.sh && bash"
+# fi
 
 # 显示状态
 echo "容器状态:"

@@ -207,12 +207,32 @@ case $MODE in
 	SERVER_THREADS_N=32
 	run_ycsbc "workloada_small.spec"
 	;;
-"test")
+"ycsb-a")
 	CLIENT_THREADS_N=48
 	thread_nums=(144)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
 		run_ycsbc "workloada_zipfian.spec"
+		sleep 1
+	done
+	# run_ycsbc "workloada_zipfian.spec"
+	;;
+"ycsb-b")
+	CLIENT_THREADS_N=48
+	thread_nums=(144)
+	for thread_num in "${thread_nums[@]}"; do
+		SERVER_THREADS_N=$thread_num
+		run_ycsbc "workloadb_zipfian.spec"
+		sleep 1
+	done
+	# run_ycsbc "workloada_zipfian.spec"
+	;;
+"test")
+	CLIENT_THREADS_N=48
+	thread_nums=(144)
+	for thread_num in "${thread_nums[@]}"; do
+		SERVER_THREADS_N=$thread_num
+		run_ycsbc "workloadb_zipfian.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"

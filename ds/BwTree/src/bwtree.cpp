@@ -25,6 +25,7 @@ bool print_flag = true;
 
 #ifdef BWTREE_AUTODUMP
 const char* g_bwtree_auto_dump_path = "bwtree_dump.txt";
+std::mutex dump_mutex;
 #endif
 
 // This will be initialized when thread is initialized and in a per-thread

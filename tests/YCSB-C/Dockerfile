@@ -1,42 +1,71 @@
-FROM ubuntu:20.04
+FROM hub.oepkgs.net/openeuler/openeuler:latest
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC \
-    APT_LISTCHANGES_FRONTEND=none
+ENV TZ=UTC
 
-# Keep upstream mirrors; add retries and clean cache properly
-RUN apt-get update -o Acquire::Retries=5 && \
-    apt-get install -y --no-install-recommends \
-      build-essential \
+# Install development tools and dependencies using dnf (openEuler package manager)
+RUN dnf update -y && \
+    dnf install -y --setopt=install_weak_deps=False \
+      gcc \
+      gcc-c++ \
+      make \
       cmake \
       git \
-      pkg-config \
+      pkgconfig \
       numactl \
-      libnuma-dev \
-      libtbb-dev \
-      libpmem-dev \
-      libpmemobj-dev \
-      libssh-dev \
-      libssl-dev \
-      libatomic1 \
+      numactl-devel \
+      tbb-devel \
+      libpmem-devel \
+      libpmemobj-devel \
+      libssh-devel \
+      openssl-devel \
+      libatomic \
       autoconf \
       automake \
       libtool \
-      libdaxctl-dev \
-      libhwloc-dev \
-      libjemalloc-dev \
-      libboost-all-dev \
+      daxctl-devel \
+      hwloc-devel \
+      jemalloc-devel \
+      boost-devel \
       ca-certificates \
       curl \
       python3 \
-      python3-pip && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+      python3-pip \
+      which \
+      tar \
+      wget \
+      sudo \
+      glibc-devel \
+      libstdc++-devel && \
+    dnf clean all
+
+# Set up openEuler specific configurations
+RUN echo "LANG=en_US.UTF-8" >> /etc/environment && \
+    echo "LC_ALL=en_US.UTF-8" >> /etc/environment
 
 # Default workdir; the project will be bind-mounted here at runtime
 WORKDIR /workspace
 
-# Optional: Build and install memkind from source. Disabled by default since libmemkind-dev is installed above.
+# Create a non-root user for development
+RUN useradd -m -s /bin/bash developer && \
+    usermod -aG wheel developer && \
+    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Set up git configuration for the container
+RUN git config --global init.defaultBranch main && \
+    git config --global pull.rebase false
+
+# Install cityhash library from source
+RUN echo "Installing cityhash from source..."; \
+    cd /tmp && \
+    git clone https://github.com/google/cityhash.git && \
+    cd cityhash && \
+    ./configure --prefix=/usr && \
+    make -j"$(nproc)" && \
+    make install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/cityhash
+
+# Install memkind from openEuler repository or build from source
 ARG MEMKIND_FROM_SOURCE=0
 ARG MEMKIND_VERSION=master
 RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
@@ -45,8 +74,8 @@ RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
       rm -rf /tmp/memkind; \
       success=""; \
       for URL in \
-        # https://github.com/memkind/memkind.git \
-        https://ghfast.top/https://github.com/memkind/memkind.git; do \
+        https://github.com/memkind/memkind.git \
+        https://gitee.com/mirrors/memkind.git; do \
         echo "Cloning memkind from $URL"; \
         if git clone --branch ${MEMKIND_VERSION} "$URL" /tmp/memkind; then \
           success=1; \
@@ -64,9 +93,31 @@ RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
       ldconfig && \
       cd / && rm -rf /tmp/memkind; \
     else \
-      echo "Skipping memkind source build; using distro package libmemkind-dev"; \
+      echo "Installing memkind from openEuler repository"; \
+      dnf install -y memkind-devel || echo "memkind-devel not available in repository, will build from source if needed"; \
     fi
 
+# Switch to developer user and set up the environment
+USER developer
+WORKDIR /workspace
+
+# Set up environment variables for the developer user
+ENV HOME=/home/developer
+ENV USER=developer
+
+# Create a startup script that shows useful information
+RUN echo '#!/bin/bash' > /home/developer/startup.sh && \
+    echo 'echo "=== openEuler Development Environment ==="' >> /home/developer/startup.sh && \
+    echo 'echo "OS: $(cat /etc/os-release | grep PRETTY_NAME)"' >> /home/developer/startup.sh && \
+    echo 'echo "Kernel: $(uname -r)"' >> /home/developer/startup.sh && \
+    echo 'echo "Architecture: $(uname -m)"' >> /home/developer/startup.sh && \
+    echo 'echo "Available tools: gcc, cmake, git, numactl, etc."' >> /home/developer/startup.sh && \
+    echo 'echo "Working directory: $(pwd)"' >> /home/developer/startup.sh && \
+    echo 'echo "========================================="' >> /home/developer/startup.sh && \
+    echo 'exec "$@"' >> /home/developer/startup.sh && \
+    chmod +x /home/developer/startup.sh
+
+ENTRYPOINT ["/home/developer/startup.sh"]
 CMD ["bash"]
 
 

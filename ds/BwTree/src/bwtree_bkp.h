@@ -28,6 +28,9 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+
+// Include memory optimization configuration
+#include <memkind.h>
 #include <thread>
 #include <unordered_set>
 // offsetof() is defined here
@@ -58,7 +61,7 @@
  * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
  * 默认关闭，如需开启请在编译命令或此处取消注释
  */
-#define BWTREE_AUTODUMP
+// #define BWTREE_AUTODUMP
 
 #ifdef BWTREE_PELOTON
 
@@ -130,7 +133,6 @@ namespace wangziqi2013 {
 namespace bwtree {
 #ifdef BWTREE_AUTODUMP
 extern const char* g_bwtree_auto_dump_path;
-extern std::mutex dump_mutex;
 #endif
 
 // This needs to be always here
@@ -232,6 +234,14 @@ class BwTreeBase {
   nt<uint64_t> global_root_id;
 #endif
 
+#ifdef ENABLE_ROOT_CACHE
+  // Thread-local root node caching (alternative to OPT_ROOT_READ)
+  static thread_local uint64_t tl_cached_root_id;
+  static thread_local const void* tl_cached_root_ptr;
+  static thread_local uint64_t tl_cache_version;
+  std::atomic<uint64_t> global_cache_version{0};
+#endif
+
 protected:
   class MetaData {
     public:
@@ -271,15 +281,15 @@ protected:
     // actual epoch it is unlinked from the data structure
     uint64_t delete_epoch;
     void *node_p;
-    NodeID node_id;
     GarbageNode *next_p;
 
     /*
      * Constructor
      */
-    GarbageNode(uint64_t p_delete_epoch, void *p_node_p, const NodeID p_node_id) : delete_epoch{p_delete_epoch}, node_p{p_node_p}, node_id{p_node_id}, next_p{nullptr} {}
+    GarbageNode(uint64_t p_delete_epoch, void *p_node_p)
+        : delete_epoch{p_delete_epoch}, node_p{p_node_p}, next_p{nullptr} {}
 
-    GarbageNode() : delete_epoch{0UL}, node_p{nullptr}, node_id{0}, next_p{nullptr} {}
+    GarbageNode() : delete_epoch{0UL}, node_p{nullptr}, next_p{nullptr} {}
   };
 
   /*
@@ -327,7 +337,7 @@ protected:
 
   // Make sure class Data does not exceed one cache line
   #ifndef NT_SIM
-  static_assert(sizeof(GCMetaData) < 2 * cl_size,
+  static_assert(sizeof(GCMetaData) < cl_size,
                 "class Data size exceeds cache line length!");
                 #endif
 
@@ -365,7 +375,7 @@ protected:
                 " not conform to the alignment!");
 
 #ifndef NT_SIM  
-  using PaddedGCMetadata = PaddedData<GCMetaData, 2 * cl_size>;
+  using PaddedGCMetadata = PaddedData<GCMetaData, cl_size>;
 #else
   using PaddedGCMetadata = PaddedData<GCMetaData, 3 * cl_size>;
 #endif
@@ -1171,7 +1181,6 @@ class BwTree : public BwTreeBase {
     bool need_retry_slow_path;
     bool need_retry_half_slow_path;
     bool retrying_slow_path;
-    bool is_read_ops;
 #endif
 
     /*
@@ -1201,8 +1210,7 @@ class BwTree : public BwTreeBase {
 #ifdef OPT_IN_USE_FLAG
           need_retry_slow_path{false},
           need_retry_half_slow_path{false},
-          retrying_slow_path{true}, // should set to true because insert rely on this to access bypass cache
-          is_read_ops{false},
+          retrying_slow_path{true},
 #endif
 
           abort_flag{false} {
@@ -1478,7 +1486,6 @@ class BwTree : public BwTreeBase {
      */
     inline void SetHighKeyPair(const KeyNodeIDPair *p_high_key_p) {
       metadata.high_key_p = p_high_key_p;
-      assert(p_high_key_p != nullptr);
 
       return;
     }
@@ -2112,8 +2119,7 @@ class BwTree : public BwTreeBase {
         return meta_p;
       }
 #ifdef USE_CXL
-      char *new_chunk;
-      cacheable.clalign((void **)&new_chunk, CHUNK_SIZE);
+      char *new_chunk = (char *)cacheable.malloc(CHUNK_SIZE);
 #else
       char *new_chunk = new char[CHUNK_SIZE];
 #endif
@@ -2136,6 +2142,9 @@ class BwTree : public BwTreeBase {
       if (ret == true) {
         return new_meta_base;
       }
+
+      // Note: No need to revert memory tracking here since we didn't track
+      // chunk allocation at this level - it's handled at ElasticNode level
 
       // Note that here we call destructor manually and then delete the char[]
       // to complete the entire sequence which should be done by the compiler
@@ -2200,6 +2209,9 @@ class BwTree : public BwTreeBase {
       while (meta_p != nullptr) {
         // Save the next pointer to traverse to it later
         AllocationMeta *next_p = meta_p->next.load();
+
+        // Note: Memory tracking is handled at ElasticNode level
+        // since AllocationMeta doesn't have access to the tree instance
 
         // 1. Manually call destructor
         // 2. Delete it as a char[]
@@ -2270,9 +2282,9 @@ class BwTree : public BwTreeBase {
           low_key{p_low_key},
           high_key{p_high_key},
           end{start}{
-// #ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//       SetChainHead(this);
-// #endif
+#ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+      SetChainHead(this);
+#endif
     }
 
     /*
@@ -2309,9 +2321,7 @@ class BwTree : public BwTreeBase {
 
       return;
     }
-
-// #ifdef OPT_IN_USE_FLAG
-#if 0
+#ifdef OPT_IN_USE_FLAG
     bool IsNotInUse() const {
 #ifdef OPT_DUP_IN_USE_FLAG
       return status_flag[gc_id % OPT_DUP_IN_USE_FLAG].load() == NOT_IN_USE;
@@ -2487,16 +2497,24 @@ class BwTree : public BwTreeBase {
       // basic template + ElementType element size * (node size) + CHUNK_SIZE
       // Note: do not make it constant since it is going to be modified
       // after being returned
+      size_t allocation_size = sizeof(ElasticNode) + size * sizeof(ElementType) +
+                               AllocationMeta::CHUNK_SIZE;
 #ifdef USE_CXL
-      char *alloc_base = (char *)cacheable.malloc(sizeof(ElasticNode) +
-                                                 size * sizeof(ElementType) +
-                                                 AllocationMeta::CHUNK_SIZE);
+      char *alloc_base = (char *)cacheable.malloc(allocation_size);
+      // static uint64_t allocated_bytes = 0;
+      // static uint64_t count = 0;
+      // allocated_bytes += allocation_size;
+      // if (count % 10000 == 0) {
+      //   printf("elastic node allocated bytes: %zu MB\n", allocated_bytes / 1024 / 1024);
+      // }
+      // count++;
 #else
-      char *alloc_base =
-          new char[sizeof(ElasticNode) + size * sizeof(ElementType) +
-                   AllocationMeta::CHUNK_SIZE];
+      char *alloc_base = new char[allocation_size];
 #endif
       assert(alloc_base != nullptr);
+
+      // Note: Memory tracking for ElasticNode will be handled
+      // at a higher level to avoid complexity with static function access
 
       // Initialize the AllocationMeta - tail points to the first byte inside
       // class ElasticNode; limit points to the first byte after class
@@ -2947,8 +2965,7 @@ class BwTree : public BwTreeBase {
       // Here all epoch counters have been set to 0xFFFFFFFFFFFFFFFF
       // so GC should always succeed
 #ifndef NT_SIM
-// FIXME(FN): disable performing GC to avoid bugs
-      // PerformGC(i);
+      PerformGC(i);
 #endif
 
       // This will collect all nodes since we have adjusted the currenr thread
@@ -2999,12 +3016,6 @@ class BwTree : public BwTreeBase {
     if (node_p == nullptr) {
       return 0UL;
     }
-// #ifdef OPT_IN_USE_FLAG
-//     // FIXME: now we directly set instead of sending message
-//     for (size_t i = 0; i < DEFAULT_MACHINE_COUNT; i++) {
-//         cached_mapping_table[i][node_id].store(nullptr);
-//     }
-// #endif
 #if defined(NO_CC)
     mapping_table[node_id].store(nullptr);
 #else
@@ -3031,12 +3042,6 @@ class BwTree : public BwTreeBase {
    * DO NOT call this in worker thread!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
    */
   inline void InvalidateNodeID(NodeID node_id) {
-// #ifdef OPT_IN_USE_FLAG
-//     // FIXME: now we directly set instead of sending message
-//     for (size_t i = 0; i < DEFAULT_MACHINE_COUNT; i++) {
-//         cached_mapping_table[i][node_id].store(nullptr);
-//     }
-// #endif
 #ifdef NO_CC
     mapping_table[node_id].store(nullptr);
 #else
@@ -3319,17 +3324,6 @@ class BwTree : public BwTreeBase {
                MAPPING_TABLE_SIZE);
     bwt_printf("Fast initialization: Do not set to zero\n");
 
-#ifdef OPT_IN_USE_FLAG
-    for (size_t i = 0; i < DEFAULT_MACHINE_COUNT; i++) {
-      // memset(&cached_mapping_table[i], 0, MAPPING_TABLE_SIZE);
-      for (size_t j = 0; j < MAPPING_TABLE_SIZE; j++) {
-        if (cached_mapping_table[i][j].load() != nullptr) {
-          cached_mapping_table[i][j].store(nullptr);
-        }
-      }
-    }
-#endif
-
     return;
   }
 
@@ -3437,11 +3431,16 @@ class BwTree : public BwTreeBase {
     ret = mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
 #endif
 
-#ifdef BWTREE_AUTODUMP
-    if (ret) {
-      PrintNodeInfo(node_id, node_p);
-    }
-#endif
+    // 自动导出树结构：仅在CAS成功时输出
+// #ifdef BWTREE_AUTODUMP
+//   static std::mutex dump_mutex;
+//   std::lock_guard<std::mutex> lk(dump_mutex);
+//   std::ofstream ofs(g_bwtree_auto_dump_path, std::ios::app);
+//   if (ofs.good()) {
+//     ofs << "\n[AutoDump] After Install NodeId=" << node_id << "\n";
+//     PrintTreeStructure(ofs);
+//   }
+// #endif
 
     return ret;
   }
@@ -3474,11 +3473,23 @@ class BwTree : public BwTreeBase {
     return true;
 #else
     ret = root_id.compare_exchange_strong(old_root_node_id, new_root_node_id);
+#ifdef ENABLE_ROOT_CACHE
+    if (ret) {
+      // Invalidate thread-local root cache when root changes
+      InvalidateRootCache();
+    }
+#endif
 #endif
 
 #ifdef BWTREE_AUTODUMP
-    if (ret) {
-      std::cout << "New Root node (ID: " << new_root_node_id << ")" << std::endl;
+    {
+      static std::mutex dump_mutex;
+      std::lock_guard<std::mutex> lk(dump_mutex);
+      std::ofstream ofs(g_bwtree_auto_dump_path ? g_bwtree_auto_dump_path : "bwtree_dump.txt", std::ios::app);
+      if (ofs.good()) {
+        ofs << "\n[AutoDump] After InstallRootNode old=" << old_root_node_id << ", new=" << new_root_node_id << "\n";
+        PrintTreeStatistics(ofs);
+      }
     }
 #endif
 
@@ -3505,9 +3516,23 @@ class BwTree : public BwTreeBase {
     mapping_table[node_id] = node_p;
 #endif
 
-#ifdef BWTREE_AUTODUMP
-    PrintNodeInfo(node_id, node_p);
-#endif
+// #ifdef BWTREE_AUTODUMP
+//     static std::mutex dump_mutex;
+//     std::lock_guard<std::mutex> lk(dump_mutex);
+    
+//     // 如果是第一个节点，删除之前的dump文件
+//     static bool first_node = true;
+//     if (first_node) {
+//       std::remove(g_bwtree_auto_dump_path);
+//       first_node = false;
+//     }
+    
+//     std::ofstream ofs(g_bwtree_auto_dump_path, std::ios::app);
+//     if (ofs.good()) {
+//       ofs << "\n[AutoDump] After Install NodeId=" << node_id << "\n";
+//       PrintTreeStructure(ofs);
+//     }
+// #endif
 
     return;
   }
@@ -3528,31 +3553,6 @@ class BwTree : public BwTreeBase {
   inline const BaseNode *GetNode(const NodeID node_id, bool bypass_cache = BYPASS_CACHE_DEFAULT) {
     assert(node_id != INVALID_NODE_ID);
     assert(node_id < MAPPING_TABLE_SIZE);
-    const BaseNode *ret = nullptr;
-
-#ifdef OPT_IN_USE_FLAG
-    // bypass_cache == true: should use data in mapping_table and update cache
-    // bypass_cache == false: use data in cache
-    if (bypass_cache == false) {
-      const BaseNode *cached = GetLocalCacheMappingTable()[node_id].load();
-      if (cached != nullptr) {
-        if (cached->IsOnLeafDeltaChain()) {
-          ret = mapping_table[node_id].load();
-          CatchupLocalCacheMappingTable(node_id, ret);
-          return ret;
-        }
-        if (cached != mapping_table[node_id].load()) {
-          std::cout << "cached != mapping_table[node_id].load() for node_id " << node_id << std::endl;
-        }
-        return cached;
-      } else {    // else, cached is nullptr, meaning that the node is not cached
-        // update cache to mapping_table
-        ret = mapping_table[node_id].load();
-        CatchupLocalCacheMappingTable(node_id, ret);
-        return ret;
-      }
-    }
-#endif
 
 #ifdef OPT_ROOT_READ
     if (node_id == GetRootID(true)){
@@ -3561,20 +3561,15 @@ class BwTree : public BwTreeBase {
 #endif
 
 #ifdef NO_CC
-    ret = mapping_table[node_id].load(std::memory_order_seq_cst, bypass_cache);
+    const BaseNode *ret =
+        mapping_table[node_id].load(std::memory_order_seq_cst, bypass_cache);
     if (ret == nullptr && bypass_cache == false) [[unlikely]] {
-      ret = mapping_table[node_id].load(std::memory_order_seq_cst, true);
+      return mapping_table[node_id].load(std::memory_order_seq_cst, true);
     }
-#else
-    ret = mapping_table[node_id].load();
-#endif
-
-#ifdef OPT_IN_USE_FLAG
-    assert(bypass_cache == true);
-    GetLocalCacheMappingTable()[node_id].store(ret);
-#endif
-
     return ret;
+#else
+    return mapping_table[node_id].load();
+#endif
   }
 
   /*
@@ -3662,8 +3657,6 @@ class BwTree : public BwTreeBase {
 
         goto abort_traverse;
       }
-
-      assert(child_node_id != INVALID_NODE_ID);
 
       // This might load a leaf child
       // Also LoadNodeID() does not guarantee the node bound matches
@@ -3798,13 +3791,6 @@ class BwTree : public BwTreeBase {
             "Bounds checking failed (id = %lu) - "
             "Go right.\n",
             snapshot_p->node_id);
-#ifdef OPT_IN_USE_FLAG
-        // if we uses cache pointer in the fast path, we should first retry slow path
-        if (context_p->is_read_ops && !context_p->retrying_slow_path) {
-          context_p->need_retry_slow_path = true;
-          return;
-        }
-#endif
 #ifdef OPT_ROOT_READ
         // if (GetRootPtr(true) != mapping_table[global_root_id.load()]) {
         if (GetRootID(true) !=
@@ -4004,15 +3990,6 @@ class BwTree : public BwTreeBase {
     // Save some keystrokes
     const BaseNode *node_p = snapshot_p->node_p;
 
-#ifdef OPT_IN_USE_FLAG
-    if (!context_p->retrying_slow_path) {
-      if (snapshot_p->IsLeaf() == false || snapshot_p->node_id == INVALID_NODE_ID || snapshot_p->node_p == nullptr) {
-        context_p->need_retry_slow_path = true;
-        return INVALID_NODE_ID;
-      }
-    }
-#else
-
     // Make sure the structure is valid
     assert(snapshot_p->IsLeaf() == false);
     assert(snapshot_p->node_p != nullptr);
@@ -4021,7 +3998,7 @@ class BwTree : public BwTreeBase {
     // to remember the node ID for read - read is always stateless until
     // it has reached a leaf node
     assert(snapshot_p->node_id != INVALID_NODE_ID);
-#endif
+
     bwt_printf("Navigating inner node delta chain...\n");
 
     // Always start with the first element
@@ -4712,9 +4689,9 @@ class BwTree : public BwTreeBase {
 
     int start_index = 0;
     int end_index = -1;
-// #ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//     BaseNode *current_chain_head = const_cast<BaseNode *>(node_p);
-// #endif
+#ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+    BaseNode *current_chain_head = const_cast<BaseNode *>(node_p);
+#endif
 
     while (1) {
       NodeType type = node_p->GetType();
@@ -4723,36 +4700,36 @@ class BwTree : public BwTreeBase {
         case NodeType::LeafType: {
           const LeafNode *leaf_node_p = static_cast<const LeafNode *>(node_p);
 
-// #ifdef OPT_IN_USE_FLAG
-//           // if (!context_p->retrying_slow_path) {
+#ifdef OPT_IN_USE_FLAG
+          // if (!context_p->retrying_slow_path) {
 
-// #ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//           BaseNode *real_chain_head = leaf_node_p->GetChainHead();
-//           if ((uint64_t)real_chain_head == LeafNode::NOT_IN_USE) {
-//             context_p->retrying_slow_path = true;
-//             return;
-//           }
+#ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+          BaseNode *real_chain_head = leaf_node_p->GetChainHead();
+          if ((uint64_t)real_chain_head == LeafNode::NOT_IN_USE) {
+            context_p->retrying_slow_path = true;
+            return;
+          }
 
-//           if (real_chain_head != current_chain_head) {
-//             if (!context_p->retrying_slow_path) {
-//               context_p->need_retry_half_slow_path = true;
-//               return;
-//             } else {
-//               MarkLeafNodeChainHeadRecursive(node_p, current_chain_head);
-//             }
-//           }
-// #else
-//           if (leaf_node_p->IsNotInUse()) [[unlikely]] {
-//             context_p->retrying_slow_path = true;
-//             return;
-//           }
-// #endif
-//           // else if (leaf_node_p->IsUpdated()) {
-//           //   context_p->need_retry_half_slow_path = true;
-//           //   return;
-//           // }
-//           // }
-// #endif
+          if (real_chain_head != current_chain_head) {
+            if (!context_p->retrying_slow_path) {
+              context_p->need_retry_half_slow_path = true;
+              return;
+            } else {
+              MarkLeafNodeChainHeadRecursive(node_p, current_chain_head);
+            }
+          }
+#else
+          if (leaf_node_p->IsNotInUse()) [[unlikely]] {
+            context_p->retrying_slow_path = true;
+            return;
+          }
+#endif
+          // else if (leaf_node_p->IsUpdated()) {
+          //   context_p->need_retry_half_slow_path = true;
+          //   return;
+          // }
+          // }
+#endif
 
           auto start_it = leaf_node_p->Begin() + start_index;
 
@@ -4834,18 +4811,9 @@ class BwTree : public BwTreeBase {
           break;
         }  // case LeafDeleteType
         case NodeType::LeafRemoveType: {
-#ifdef OPT_IN_USE_FLAG
-          if (context_p->is_read_ops && !context_p->retrying_slow_path) {
-            context_p->need_retry_slow_path = true;
-            return;
-          } else {
-            bwt_printf("ERROR: Observed LeafRemoveNode in delta chain in slow path\n");
-            assert(false);
-          }
-#else
           bwt_printf("ERROR: Observed LeafRemoveNode in delta chain\n");
+
           assert(false);
-#endif
         }  // case LeafRemoveType
         case NodeType::LeafMergeType: {
           bwt_printf("Observed a merge node on leaf delta chain\n");
@@ -5905,7 +5873,7 @@ class BwTree : public BwTreeBase {
 
 #ifdef OPT_IN_USE_FLAG
     // In OPT fast path we don't consolidate the node, but the node is still readable
-    if (context_p->is_read_ops && !context_p->retrying_slow_path) [[unlikely]] {
+    if (!context_p->retrying_slow_path) [[unlikely]] {
       return;
     }
 #endif
@@ -5940,10 +5908,10 @@ class BwTree : public BwTreeBase {
       case NodeType::InnerAbortType: {
 
 #if defined(NO_CC) && defined(OPT_IN_USE_FLAG)
-    if (context_p->is_read_ops && !context_p->retrying_slow_path) [[unlikely]] {
-      context_p->need_retry_slow_path = true;
-      return;
-    }
+        if (!context_p->retrying_slow_path) [[unlikely]] {
+          context_p->need_retry_slow_path = true;
+          return;
+        }
 #endif
 
         bwt_printf("Observed Inner Abort Node; Continue\n");
@@ -5986,15 +5954,11 @@ class BwTree : public BwTreeBase {
                                             Context *context_p) {
 #ifdef OPT_IN_USE_FLAG
     const BaseNode *node_p = GetNode(node_id, context_p->retrying_slow_path);
-    if (node_p == nullptr) {
-      // node in global mapping table is also NULL, so we need to retry slow path
-      context_p->need_retry_slow_path = true;
-    }
 #else
     const BaseNode *node_p = GetNode(node_id);
 #endif
 
-    // bwt_printf("Is leaf node (RO)? - %d\n", node_p->IsOnLeafDeltaChain());
+    bwt_printf("Is leaf node (RO)? - %d\n", node_p->IsOnLeafDeltaChain());
 
 #ifdef BWTREE_DEBUG
 
@@ -6027,14 +5991,7 @@ class BwTree : public BwTreeBase {
     // This pushes a new snapshot into stack
     TakeNodeSnapshotReadOptimized(node_id, context_p);
 
-#ifdef OPT_IN_USE_FLAG
-    // FIXME(FN): disable fixing SMO for OPT_IN_USE_FLAG to avoid bugs
-    if (context_p->retrying_slow_path) [[unlikely]] {
-      FinishPartialSMOReadOptimized(context_p);
-    }
-#else
     FinishPartialSMOReadOptimized(context_p);
-#endif
 
     // Do not need to check for abort flag here
 
@@ -6138,11 +6095,10 @@ class BwTree : public BwTreeBase {
 #endif
     // This is the serialization point for reading/writing root node
 
-    NodeID child_node_id = INVALID_NODE_ID;
 #ifdef OPT_IN_USE_FLAG
-    child_node_id = GetRootID(context_p->retrying_slow_path);
+    NodeID child_node_id = GetRootID(context_p->retrying_slow_path);
 #else
-    child_node_id = GetRootID();
+    NodeID child_node_id = GetRootID();
 #endif
 
     LoadNodeIDReadOptimized(child_node_id, context_p);
@@ -6217,40 +6173,33 @@ class BwTree : public BwTreeBase {
       if (snapshot_p->IsLeaf() == true) {
         bwt_printf("The next node is a leaf (RO)\n");
 
-// #ifdef OPT_IN_USE_FLAG
-// #ifndef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//         bool original_retrying_slow_path = context_p->retrying_slow_path;
-//         context_p->retrying_slow_path = true;
-//         LoadNodeIDReadOptimized(child_node_id, context_p);
-//         context_p->retrying_slow_path = original_retrying_slow_path;
-//         snapshot_p = GetLatestNodeSnapshot(context_p);
-// #endif
-// #endif
+#ifdef OPT_IN_USE_FLAG
+#ifndef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+        bool original_retrying_slow_path = context_p->retrying_slow_path;
+        context_p->retrying_slow_path = true;
+        LoadNodeIDReadOptimized(child_node_id, context_p);
+        context_p->retrying_slow_path = original_retrying_slow_path;
+        snapshot_p = GetLatestNodeSnapshot(context_p);
+#endif
+#endif
 
         NavigateLeafNode(context_p, *value_list_p);
-#ifdef OPT_IN_USE_FLAG
-        // if value is not found, should retry slow path
-        if (value_list_p->size() == 0) {
-          context_p->need_retry_slow_path = true;
-          goto retry_slow_path_traverse;
-        }
-#endif
 
 #ifdef OPT_IN_USE_FLAG
         if (context_p->need_retry_slow_path) [[unlikely]] {
           goto retry_slow_path_traverse;
         }
-// #ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//         if (context_p->need_retry_half_slow_path) {
-// #ifdef BWTREE_RETRY_COUNT
-//           half_counter->Increment();
-// #endif
-//           context_p->need_retry_half_slow_path = false;
-//           context_p->retrying_slow_path = true;
-//           context_p->current_snapshot.node_id = INVALID_NODE_ID;
-//           goto retry_half_slow_path_traverse;
-//         }
-// #endif
+#ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+        if (context_p->need_retry_half_slow_path) {
+#ifdef BWTREE_RETRY_COUNT
+          half_counter->Increment();
+#endif
+          context_p->need_retry_half_slow_path = false;
+          context_p->retrying_slow_path = true;
+          context_p->current_snapshot.node_id = INVALID_NODE_ID;
+          goto retry_half_slow_path_traverse;
+        }
+#endif
 #endif
 
         if (context_p->abort_flag == true) {
@@ -6322,9 +6271,6 @@ class BwTree : public BwTreeBase {
                                   const KeyNodeIDPair &insert_item,
                                   const KeyNodeIDPair &next_item,
                                   const KeyNodeIDPair *location) {
-#ifdef OPT_IN_USE_FLAG
-    assert(context_p->retrying_slow_path == true);
-#endif
     // if (context_p->IsOnRootNode()) {
     // printf("PostInnerInsertNode, parent node_p=%p\n", context_p->parent_snapshot.node_p);
     // }
@@ -6388,9 +6334,6 @@ class BwTree : public BwTreeBase {
                                   const KeyNodeIDPair &prev_item,
                                   const KeyNodeIDPair &next_item,
                                   const KeyNodeIDPair *location) {
-#ifdef OPT_IN_USE_FLAG
-    assert(context_p->retrying_slow_path == true);
-#endif
     NodeSnapshot *parent_snapshot_p = GetLatestParentNodeSnapshot(context_p);
 
     // Arguments are:
@@ -6424,7 +6367,7 @@ class BwTree : public BwTreeBase {
       // should be removed together with the merge node above it
       // Also, the remove node acts as a container for removed NodeID
       // which will be recycled when the remove node is recycled
-      epoch_manager.AddGarbageNode(garbage_node_p, delete_item.second);
+      epoch_manager.AddGarbageNode(garbage_node_p);
 
       // To avoid this entry being recycled during tree destruction
       // Since the entry still remains in the old inner base node
@@ -6486,10 +6429,6 @@ class BwTree : public BwTreeBase {
     // printf("snapshort_p->level=%d\n", context_p->current_level);
     // printf("parent node type=%d\n", context_p->parent_snapshot.node_p ? int(context_p->parent_snapshot.node_p->GetType()) : 0);
     // printf("current node type=%d\n", context_p->current_snapshot.node_p ? int(context_p->current_snapshot.node_p->GetType()) : 0);
-#ifdef OPT_IN_USE_FLAG
-    if (!context_p->retrying_slow_path)
-      return;
-#endif
 
   before_switch:
     switch (snapshot_p->node_p->GetType()) {
@@ -6801,13 +6740,20 @@ class BwTree : public BwTreeBase {
             // Note that the remove node must not be created on inner_node_p
             // since inner_node_p might be destroyed before remove node is
             // destroyed since they are both put into the GC chain
+#ifdef USE_CXL
+            const InnerRemoveNode *fake_remove_node_p =
+                static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+            new (const_cast<InnerRemoveNode*>(fake_remove_node_p))
+                InnerRemoveNode{new_root_id, inner_node_p};
+#else
             const InnerRemoveNode *fake_remove_node_p =
                 new InnerRemoveNode{new_root_id, inner_node_p};
+#endif
 
             // Put the remove node into garbage chain, because
             // we cannot call InvalidateNodeID() here
-            epoch_manager.AddGarbageNode(fake_remove_node_p, new_root_id);
-            epoch_manager.AddGarbageNode(inner_node_p, new_root_id);
+            epoch_manager.AddGarbageNode(fake_remove_node_p);
+            epoch_manager.AddGarbageNode(inner_node_p);
 
             context_p->abort_flag = true;
 
@@ -6906,36 +6852,36 @@ class BwTree : public BwTreeBase {
     return;
   }
 
-// #ifdef OPT_IN_USE_FLAG
-//   void MarkLeafNodeUnusedRecursive(const BaseNode* node){
-//     NodeType type;
-//     while (1) {
-//       type = node->GetType();
-//       switch (type) {
-//         case NodeType::LeafType:
-//           const_cast<LeafNode *>(static_cast<const LeafNode *>(node))
-//               ->SetNotInUse();
-//           return;
-//         case NodeType::LeafInsertType:
-//           node = static_cast<const LeafInsertNode *>(node)->child_node_p;
-//           break;
-//         case NodeType::LeafDeleteType:
-//           node = static_cast<const LeafDeleteNode *>(node)->child_node_p;
-//           break;
-//         case NodeType::LeafSplitType:
-//           node = static_cast<const LeafSplitNode *>(node)->child_node_p;
-//           break;
-//         case NodeType::LeafMergeType:
-//           MarkLeafNodeUnusedRecursive(
-//               static_cast<const LeafMergeNode *>(node)->right_merge_p);
-//           node = static_cast<const LeafMergeNode *>(node)->child_node_p;
-//           break;
-//         default:
-//           assert(false);
-//       }
-//     }
-//   }
-// #endif
+#ifdef OPT_IN_USE_FLAG
+  void MarkLeafNodeUnusedRecursive(const BaseNode* node){
+    NodeType type;
+    while (1) {
+      type = node->GetType();
+      switch (type) {
+        case NodeType::LeafType:
+          const_cast<LeafNode *>(static_cast<const LeafNode *>(node))
+              ->SetNotInUse();
+          return;
+        case NodeType::LeafInsertType:
+          node = static_cast<const LeafInsertNode *>(node)->child_node_p;
+          break;
+        case NodeType::LeafDeleteType:
+          node = static_cast<const LeafDeleteNode *>(node)->child_node_p;
+          break;
+        case NodeType::LeafSplitType:
+          node = static_cast<const LeafSplitNode *>(node)->child_node_p;
+          break;
+        case NodeType::LeafMergeType:
+          MarkLeafNodeUnusedRecursive(
+              static_cast<const LeafMergeNode *>(node)->right_merge_p);
+          node = static_cast<const LeafMergeNode *>(node)->child_node_p;
+          break;
+        default:
+          assert(false);
+      }
+    }
+  }
+#endif
 
   /*
    * ConsolidateLeafNode() - Consolidates a leaf delta chain unconditionally
@@ -6951,14 +6897,15 @@ class BwTree : public BwTreeBase {
                                     snapshot_p->node_p);
 
     if (ret == true) {
-// #ifdef OPT_IN_USE_FLAG
-//       MarkLeafNodeUnusedRecursive(snapshot_p->node_p);
-// #endif
-      epoch_manager.AddGarbageNode(snapshot_p->node_p, snapshot_p->node_id);
+#ifdef OPT_IN_USE_FLAG
+      MarkLeafNodeUnusedRecursive(snapshot_p->node_p);
+#endif
+
+      epoch_manager.AddGarbageNode(snapshot_p->node_p);
 
       snapshot_p->node_p = leaf_node_p;
     } else {
-      epoch_manager.AddGarbageNode(leaf_node_p, snapshot_p->node_id);
+      epoch_manager.AddGarbageNode(leaf_node_p);
     }
 
     return;
@@ -6978,11 +6925,11 @@ class BwTree : public BwTreeBase {
                                     snapshot_p->node_p);
 
     if (ret == true) {
-      epoch_manager.AddGarbageNode(snapshot_p->node_p, snapshot_p->node_id);
+      epoch_manager.AddGarbageNode(snapshot_p->node_p);
 
       snapshot_p->node_p = inner_node_p;
     } else {
-      epoch_manager.AddGarbageNode(inner_node_p, snapshot_p->node_id);
+      epoch_manager.AddGarbageNode(inner_node_p);
     }
 
     return;
@@ -7060,12 +7007,6 @@ class BwTree : public BwTreeBase {
         return;
       }
     }
-
-#ifdef OPT_IN_USE_FLAG
-    if (!context_p->retrying_slow_path && node_p->IsInnerNode()) {
-      return;
-    }
-#endif
 
     // After this point we decide to consolidate node
 
@@ -7182,13 +7123,20 @@ class BwTree : public BwTreeBase {
           // since they are both put into the GC chain, it is possible
           // for new_leaf_node_p to be deleted first and then remove node
           // is deleted
+#ifdef USE_CXL
+          const LeafRemoveNode *fake_remove_node_p =
+              static_cast<LeafRemoveNode*>(cacheable.malloc(sizeof(LeafRemoveNode)));
+          new (const_cast<LeafRemoveNode*>(fake_remove_node_p))
+              LeafRemoveNode{new_node_id, new_leaf_node_p};
+#else
           const LeafRemoveNode *fake_remove_node_p =
               new LeafRemoveNode{new_node_id, new_leaf_node_p};
+#endif
 
           // Must put both of them into GC chain since RemoveNode
           // will not be followed by GC thread
-          epoch_manager.AddGarbageNode(fake_remove_node_p, new_node_id);
-          epoch_manager.AddGarbageNode(new_leaf_node_p, new_node_id);
+          epoch_manager.AddGarbageNode(fake_remove_node_p);
+          epoch_manager.AddGarbageNode(new_leaf_node_p);
 
           // We have two nodes to delete here
           split_node_p->~LeafSplitNode();
@@ -7232,8 +7180,15 @@ class BwTree : public BwTreeBase {
           return;
         }
 
+#ifdef USE_CXL
+        const LeafRemoveNode *remove_node_p =
+            static_cast<LeafRemoveNode*>(cacheable.malloc(sizeof(LeafRemoveNode)));
+        new (const_cast<LeafRemoveNode*>(remove_node_p))
+            LeafRemoveNode{node_id, node_p};
+#else
         const LeafRemoveNode *remove_node_p =
             new LeafRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7306,7 +7261,7 @@ class BwTree : public BwTreeBase {
           // Put the new inner node into GC chain
           // Although it is not entirely necessary it is good for us to
           // make is so to avoid redundant code here
-          epoch_manager.AddGarbageNode(new_inner_node_p, split_key_child_node_id);
+          epoch_manager.AddGarbageNode(new_inner_node_p);
 
           return;
         }
@@ -7341,11 +7296,18 @@ class BwTree : public BwTreeBase {
           // Note that this remove node should be created on existing node
           // rather than on new_inner_node_p, since new_inner_node_p may
           // be destroyed before fake_remove_node_p is destroyed
+#ifdef USE_CXL
+          const InnerRemoveNode *fake_remove_node_p =
+              static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+          new (const_cast<InnerRemoveNode*>(fake_remove_node_p))
+              InnerRemoveNode{new_node_id, new_inner_node_p};
+#else
           const InnerRemoveNode *fake_remove_node_p =
               new InnerRemoveNode{new_node_id, new_inner_node_p};
+#endif
 
-          epoch_manager.AddGarbageNode(fake_remove_node_p, new_node_id);
-          epoch_manager.AddGarbageNode(new_inner_node_p, new_node_id);
+          epoch_manager.AddGarbageNode(fake_remove_node_p);
+          epoch_manager.AddGarbageNode(new_inner_node_p);
 
           // Call destructor since it is allocated from the base InnerNode
           split_node_p->~InnerSplitNode();
@@ -7399,8 +7361,15 @@ class BwTree : public BwTreeBase {
           return;
         }
 
+#ifdef USE_CXL
+        const InnerRemoveNode *remove_node_p =
+            static_cast<InnerRemoveNode*>(cacheable.malloc(sizeof(InnerRemoveNode)));
+        new (const_cast<InnerRemoveNode*>(remove_node_p))
+            InnerRemoveNode{node_id, node_p};
+#else
         const InnerRemoveNode *remove_node_p =
             new InnerRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7467,7 +7436,7 @@ class BwTree : public BwTreeBase {
     // This delays the deletion of abort node until all threads has exited
     // so that existing pointers to ABORT node remain valid
     // GC does not follow the delta chain of ABORT node
-    epoch_manager.AddGarbageNode(abort_node_p, parent_node_id);
+    epoch_manager.AddGarbageNode(abort_node_p);
 
     return;
   }
@@ -7499,7 +7468,12 @@ class BwTree : public BwTreeBase {
     *abort_child_node_p_p = parent_node_p;
     *parent_node_id_p = parent_node_id;
 
+#ifdef USE_CXL
+    InnerAbortNode *abort_node_p = static_cast<InnerAbortNode*>(cacheable.malloc(sizeof(InnerAbortNode)));
+    new (abort_node_p) InnerAbortNode{parent_node_p};
+#else
     InnerAbortNode *abort_node_p = new InnerAbortNode{parent_node_p};
+#endif
 
     bool ret =
         InstallNodeToReplace(parent_node_id, abort_node_p, parent_node_p);
@@ -7881,13 +7855,13 @@ class BwTree : public BwTreeBase {
                                           snapshot_p->node_p);
 
           if (ret == true) {
-            epoch_manager.AddGarbageNode(snapshot_p->node_p, snapshot_p->node_id);
+            epoch_manager.AddGarbageNode(snapshot_p->node_p);
 
             snapshot_p->node_p = inner_node_p;
           } else {
             // This is necessary to preserve the content of the inner node
             // while avoid memory leaks
-            epoch_manager.AddGarbageNode(inner_node_p, snapshot_p->node_id);
+            epoch_manager.AddGarbageNode(inner_node_p);
           }
 
           // Next iteration will go directly into inner node we have
@@ -8023,7 +7997,6 @@ class BwTree : public BwTreeBase {
 
     while (1) {
       Context context{key};
-      // context.is_read_ops = false;
       std::pair<int, bool> index_pair;
 
       // Check whether the key-value pair exists
@@ -8034,7 +8007,6 @@ class BwTree : public BwTreeBase {
 
       // If the key-value pair already exists then return false
       if (item_p != nullptr) {
-        std::cout << "key already exists" << std::endl;
         epoch_manager.LeaveEpoch(epoch_node_p);
 
         return false;
@@ -8054,9 +8026,14 @@ class BwTree : public BwTreeBase {
       if (ret == true) {
         bwt_printf("Leaf Insert delta CAS succeed\n");
 
-// #ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
-//         MarkLeafNodeChainHeadRecursive(node_p, insert_node_p);
-// #endif
+#ifdef OPT_PASS_CHAIN_HEAD_WITH_FLAG
+        MarkLeafNodeChainHeadRecursive(node_p, insert_node_p);
+#endif
+
+        // if(node_p->GetType()==NodeType::LeafType){
+        //   LeafNode *leaf_node_p = const_cast<LeafNode *>(static_cast<const LeafNode*>(node_p));
+        //   leaf_node_p->SetUpdated();
+        // }
 
         // If install is a success then just break from the loop
         // and return
@@ -8295,7 +8272,6 @@ class BwTree : public BwTreeBase {
 
     Context context{search_key};
 #ifdef OPT_IN_USE_FLAG
-    context.is_read_ops = true;
     context.retrying_slow_path = false;
 #endif
 
@@ -8332,7 +8308,6 @@ retry_read:
     Context context{search_key};
 
     std::vector<ValueType> value_list{};
-
     TraverseReadOptimized(&context, &value_list);
 
     epoch_manager.LeaveEpoch(epoch_node_p);
@@ -8437,20 +8412,10 @@ retry_read:
   std::atomic<NodeID> next_unused_node_id;
 #endif
 
-#ifdef NO_CC
-  using mapping_table_t = std::array<nt<const BaseNode *>, MAPPING_TABLE_SIZE>;
-  mapping_table_t mapping_table;
-  #ifdef OPT_IN_USE_FLAG
-    using cached_mapping_table_t = std::array<std::atomic<const BaseNode *>, MAPPING_TABLE_SIZE>;
-    #ifndef NT_SIM // NO NT_SIM, use vector
-      std::array<cached_mapping_table_t, DEFAULT_MACHINE_COUNT> cached_mapping_table{};
-    #else // define NT_SIM, use only one cached_mapping_table_t
-      cached_mapping_table_t cached_mapping_table{};
-    #endif
-  #endif
+#if defined(NO_CC)
+  std::array<nt<const BaseNode *>, MAPPING_TABLE_SIZE> mapping_table;
 #else
-  using mapping_table_t = std::array<std::atomic<const BaseNode *>, MAPPING_TABLE_SIZE>;
-  mapping_table_t mapping_table;
+  std::array<std::atomic<const BaseNode *>, MAPPING_TABLE_SIZE> mapping_table;
 #endif
 
   // This list holds free NodeID which was removed by remove delta
@@ -8484,22 +8449,6 @@ retry_read:
 #endif
   }
 
-#ifdef OPT_IN_USE_FLAG
-  inline cached_mapping_table_t& GetLocalCacheMappingTable() {
-#ifndef NT_SIM
-    return cached_mapping_table[gc_id % DEFAULT_MACHINE_COUNT];
-#else
-    return cached_mapping_table;
-#endif
-  }
-
-  inline void CatchupLocalCacheMappingTable(NodeID node_id, const BaseNode *node_p) {
-    if (GetLocalCacheMappingTable()[node_id].load() != node_p) {
-      GetLocalCacheMappingTable()[node_id].store(node_p);
-    }
-  }
-#endif
-
   /*
    * class EpochManager - Maintains a linked list of deleted nodes
    *                      for threads to access until all threads
@@ -8511,7 +8460,11 @@ retry_read:
     BwTree *tree_p;
 
     // Garbage collection interval (milliseconds)
-    constexpr static int GC_INTERVAL = 50;
+#ifdef GC_INTERVAL_MS
+    constexpr static int GC_INTERVAL = GC_INTERVAL_MS;
+#else
+    constexpr static int GC_INTERVAL = 50;  // Default interval
+#endif
 
     /*
      * struct GarbageNode - A linked list of garbages
@@ -8593,7 +8546,12 @@ retry_read:
      * might take a long time
      */
     EpochManager(BwTree *p_tree_p) : tree_p{p_tree_p} {
+#ifdef USE_CXL
+      current_epoch_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (current_epoch_p) EpochNode{};
+#else
       current_epoch_p = new EpochNode{};
+#endif
 
       // These two are atomic variables but we could
       // simply assign to them
@@ -8717,7 +8675,12 @@ retry_read:
     void CreateNewEpoch() {
       bwt_printf("Creating new epoch...\n");
 
+#ifdef USE_CXL
+      EpochNode *epoch_node_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (epoch_node_p) EpochNode{};
+#else
       EpochNode *epoch_node_p = new EpochNode{};
+#endif
 
       epoch_node_p->active_thread_count = 0;
       epoch_node_p->garbage_list_p = nullptr;
@@ -8760,7 +8723,12 @@ retry_read:
       EpochNode *epoch_p = current_epoch_p;
 
       // These two could be predetermined
+#ifdef USE_CXL
+      GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+      new (garbage_node_p) GarbageNode{};
+#else
       GarbageNode *garbage_node_p = new GarbageNode;
+#endif
       garbage_node_p->node_p = node_p;
 
       garbage_node_p->next_p = epoch_p->garbage_list_p.load();
@@ -8863,8 +8831,8 @@ retry_read:
     /*
      * AddGarbageNode() - This encapsulates BwTree::AddGarbageNode()
      */
-    inline void AddGarbageNode(const BaseNode *node_p, const NodeID node_id = 0) {
-      tree_p->AddGarbageNode(node_p, node_id);
+    inline void AddGarbageNode(const BaseNode *node_p) {
+      tree_p->AddGarbageNode(node_p);
 
       return;
     }
@@ -8959,7 +8927,12 @@ retry_read:
             // This recycles node ID
             tree_p->InvalidateNodeID(((LeafRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            const_cast<LeafRemoveNode*>(static_cast<const LeafRemoveNode*>(node_p))->~LeafRemoveNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((LeafRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9028,7 +9001,12 @@ retry_read:
             // see the remove node exit before cleaning the NodeID
             tree_p->InvalidateNodeID(((InnerRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            const_cast<InnerRemoveNode*>(static_cast<const InnerRemoveNode*>(node_p))->~InnerRemoveNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((InnerRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9052,7 +9030,12 @@ retry_read:
             // wrong type after the node has been put into the
             // list (if we delete it directly then this will be
             // a problem)
+#ifdef USE_CXL
+            const_cast<InnerAbortNode*>(static_cast<const InnerAbortNode*>(node_p))->~InnerAbortNode();
+            cacheable.free(const_cast<void*>(static_cast<const void*>(node_p)));
+#else
             delete ((InnerAbortNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9144,14 +9127,25 @@ retry_read:
 
           // This invalidates any further reference to its
           // members (so we saved next pointer above)
+#ifdef USE_CXL
+          garbage_node_p->~GarbageNode();
+          cacheable.free(const_cast<void*>(static_cast<const void*>(garbage_node_p)));
+#else
           delete garbage_node_p;
+#endif
         }  // for
 
         // First need to save this in order to delete current node
         // safely
         EpochNode *next_epoch_node_p = head_epoch_p->next_p;
 
+
+#ifdef USE_CXL
+        head_epoch_p->~EpochNode();
+        cacheable.free(head_epoch_p);
+#else
         delete head_epoch_p;
+#endif
 
 #ifdef BWTREE_DEBUG
         epoch_freed++;
@@ -10074,9 +10068,14 @@ retry_read:
    * This is always called by the thread owning thread local data, so we
    * do not have to worry about thread identity issues
    */
-  void AddGarbageNode(const BaseNode *node_p, const NodeID node_id = 0) {
+  void AddGarbageNode(const BaseNode *node_p) {
+#ifdef USE_CXL
+    GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+    new (garbage_node_p) GarbageNode{GetGlobalEpoch(), (void *)(node_p)};
+#else
     GarbageNode *garbage_node_p =
-        new GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id};
+        new GarbageNode{GetGlobalEpoch(), (void *)(node_p)};
+#endif
     assert(garbage_node_p != nullptr);
 
     // Link this new node to the end of the linked list
@@ -10094,8 +10093,7 @@ retry_read:
     if (GetCurrentGCMetaData()->node_count > GC_NODE_COUNT_THREADHOLD) {
       // Use current thread's gc id to perform GC
 #ifndef NT_SIM
-// FIXME(FN): disable performing GC to avoid bugs
-      // PerformGC(gc_id);
+      PerformGC(gc_id);
 #endif
     }
 
@@ -10119,8 +10117,28 @@ retry_read:
 #if defined(NO_CC) && defined(OPT_GC)
     uint64_t min_epoch = SummarizeGCEpoch2(thread_id) - 1;
 #else
-    uint64_t min_epoch = SummarizeGCEpoch();
+    uint64_t min_epoch = SummarizeGCEpoch() - 1;
 #endif
+
+    // Get current epoch for analysis
+    uint64_t current_epoch = GetGlobalEpoch();
+    uint64_t epoch_gap = current_epoch - min_epoch;
+
+    // Force epoch advancement if gap is too small (helps with GC efficiency)
+    if (epoch_gap < 2) {
+        IncreaseEpoch();
+        current_epoch = GetGlobalEpoch();
+        // Recalculate min_epoch after advancement
+#if defined(NO_CC) && defined(OPT_GC)
+        min_epoch = SummarizeGCEpoch2(thread_id) - 1;
+#else
+        min_epoch = SummarizeGCEpoch() - 1;
+#endif
+        epoch_gap = current_epoch - min_epoch;
+    }
+    // Original single-node processing
+    ProcessGarbageNodes(thread_id, min_epoch);
+
     // This is the pointer we use to perform GC
     // Note that we only fetch the metadata using the current thread-local id
     GarbageNode *header_p = &GetGCMetaData(thread_id)->header;
@@ -10133,18 +10151,15 @@ retry_read:
       // This could set it to nullptr
       header_p->next_p = first_p->next_p;
 
-      // Remove cached data of the node
-#ifdef OPT_IN_USE_FLAG
-      // should first make sure the node is not in the cache
-      for (size_t i = 0; i < DEFAULT_MACHINE_COUNT; i++) {
-        cached_mapping_table[i][first_p->node_id].store(nullptr);
-      }
-#endif
-
       // Then free memory
       epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
 
+#ifdef USE_CXL
+      first_p->~GarbageNode();
+      cacheable.free(first_p);
+#else
       delete first_p;
+#endif
       assert(GetGCMetaData(thread_id)->node_count != 0UL);
       GetGCMetaData(thread_id)->node_count--;
 
@@ -10160,89 +10175,539 @@ retry_read:
     return;
   }
 
+  /*
+   * ProcessGarbageNodes() - Original garbage processing logic
+   */
+  void ProcessGarbageNodes(int thread_id, uint64_t min_epoch) {
+    GarbageNode *header_p = &GetGCMetaData(thread_id)->header;
+    GarbageNode *first_p = header_p->next_p;
+
+    // Then traverse the linked list
+    // Only reclaim memory when the deleted epoch < min epoch
+    while (first_p != nullptr && first_p->delete_epoch < min_epoch) {
+      // First unlink the current node from the linked list
+      // This could set it to nullptr
+      header_p->next_p = first_p->next_p;
+
+      // Then free memory
+      epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
+
+#ifdef USE_CXL
+      first_p->~GarbageNode();
+      cacheable.free(first_p);
+#else
+      delete first_p;
+#endif
+      assert(GetGCMetaData(thread_id)->node_count != 0UL);
+      GetGCMetaData(thread_id)->node_count--;
+
+      first_p = header_p->next_p;
+    }
+
+    // If we have freed all nodes in the linked list we should
+    // reset last_p to the header
+    if (first_p == nullptr) {
+      GetGCMetaData(thread_id)->last_p = header_p;
+    }
+  }
+
 #ifdef BWTREE_AUTODUMP
-  void PrintNodeInfo(const NodeID node_id, const BaseNode *node_p) {
-    static long long root_change_count = 0;
-    std::string type_str;
-    std::lock_guard<std::mutex> lk(dump_mutex);
-    // inner node or inner delta node
-    if (node_id == root_id.load()) {
-      root_change_count++;
-      type_str = "Root";
+  /*
+   * PrintTreeStructure() - 遍历整个BwTree并输出树结构
+   * 
+   * 这个函数会从根节点开始递归遍历，保持树的层次关系
+   * 输出一个可视化的树结构，包括节点类型、键值范围、深度等信息
+   * 
+   * 参数:
+   *   os: 输出流，默认为stdout
+   *   show_deltas: 是否显示delta链信息，默认为true
+   *   max_depth: 最大显示深度，默认为-1（无限制）
+   */
+  void PrintTreeStructure(std::ostream& os = std::cout, bool show_deltas = true, int max_depth = -1) {
+    // 将所有形状打印重定向到统一文件
+    std::ofstream __bt_out("bwtree_dump.txt", std::ios::app);
+    std::streambuf* __old_buf = nullptr;
+    if (__bt_out.good()) {
+      __old_buf = os.rdbuf(__bt_out.rdbuf());
+    }
+
+    os << "\n=== BwTree Structure Visualization ===\n";
+    os << "Root Node ID: " << GetRootID() << "\n";
+    os << "Total Allocated IDs: " << next_unused_node_id.load() - 1 << "\n\n";
+    
+    NodeID _root_id_ = GetRootID();
+    if (_root_id_ == INVALID_NODE_ID) {
+      os << "Tree is empty (no root node)\n";
+      return;
     }
     
-    if (node_p->GetType() < NodeType::LeafStart) {
-      type_str = "Inner";
-      // std::cout << "Inner node or inner delta node: " << node_p->GetType() << std::endl;
-      switch (node_p->GetType()) {
-        case NodeType::InnerType: {
-          const InnerNode *inner_node_p =
-              static_cast<const InnerNode *>(node_p);
-          std::cout << "New " << type_str << " node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- low key: " << inner_node_p->GetLowKey() << ", high key: " << inner_node_p->GetHighKey() << std::endl;
-          std::cout << "-- next node id: " << inner_node_p->GetNextNodeID() << std::endl;
-          std::cout << "-- item count: " << inner_node_p->GetItemCount() << ", items: ";
-          for (auto it = inner_node_p->Begin(); it != inner_node_p->End(); it++) {
-            std::cout << it->first << ", ";
-          }
-          std::cout << std::endl;
-          break;
-        }
-        case NodeType::InnerInsertType: {
-          const InnerInsertNode *inner_insert_node_p =
-              static_cast<const InnerInsertNode *>(node_p);
-          std::cout << "New " << type_str << " insert node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- insert item: " << inner_insert_node_p->item.first << std::endl;
-          std::cout << "-- next node id: " << inner_insert_node_p->GetNextNodeID() << std::endl;
-          break;
-        }
-        case NodeType::InnerDeleteType: {
-          const InnerDeleteNode *inner_delete_node_p =
-              static_cast<const InnerDeleteNode *>(node_p);
-          std::cout << "New " << type_str << " delete node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- delete item, prev item: " << inner_delete_node_p->prev_item.first << ", next item: " << inner_delete_node_p->next_item.first << std::endl;
-          std::cout << "-- next node id: " << node_p->GetNextNodeID() << std::endl;
-          // std::cout << "-- child node id: " << ((InnerDeleteNode *)node_p)->child_node_p->GetNodeID() << std::endl;
-          break;
-        }
-        case NodeType::InnerSplitType: {
-          const InnerSplitNode *inner_split_node_p =
-              static_cast<const InnerSplitNode *>(node_p);
-          std::cout << "New " << type_str << " split node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- split item: " << inner_split_node_p->insert_item.first << std::endl;
-          std::cout << "-- next node id: " << node_p->GetNextNodeID() << std::endl;
-          // std::cout << "-- child node id: " << ((InnerSplitNode *)node_p)->child_node_p->GetNodeID() << std::endl;
-          break;
-        }
-        case NodeType::InnerMergeType: {
-          const InnerMergeNode *inner_merge_node_p =
-              static_cast<const InnerMergeNode *>(node_p);
-          std::cout << "New " << type_str << " merge node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- next node id: " << node_p->GetNextNodeID() << std::endl;
-          std::cout << "-- delete item: " << inner_merge_node_p->delete_item.first << std::endl;
-          // std::cout << "-- right merge node id: " << inner_merge_node_p->right_merge_p->GetNodeID() << std::endl;
-          // std::cout << "-- child node id: " << ((InnerMergeNode *)node_p)->child_node_p->GetNodeID() << std::endl;
-          break;
-        }
-        case NodeType::InnerRemoveType: {
-          const InnerRemoveNode *inner_remove_node_p =
-              static_cast<const InnerRemoveNode *>(node_p);
-          std::cout << "New " << type_str << " remove node (ID: " << node_id << ")" << std::endl;
-          std::cout << "-- removed id: " << inner_remove_node_p->removed_id << std::endl;
-          std::cout << "-- next node id: " << inner_remove_node_p->GetNextNodeID() << std::endl;
-          break;
-        }
-      } // end switch
-    } else if (node_p->GetType() == NodeType::LeafType) {
-      type_str = "Leaf";
-      const LeafNode *leaf_node_p = static_cast<const LeafNode *>(node_p);
-      std::cout << "New " << type_str << " leaf node (ID: " << node_id << ")" << std::endl;
-      std::cout << "-- low key: " << leaf_node_p->GetLowKey() << ", high key: " << leaf_node_p->GetHighKey() << std::endl;
-      std::cout << "-- next node id: " << leaf_node_p->GetNextNodeID() << std::endl;
-      std::cout << "-- item count: " << leaf_node_p->GetItemCount() << ", items: ";
+    // 从根节点开始递归打印，保持层次关系
+    PrintNodeRecursive(_root_id_, os, show_deltas, max_depth, 0);
+    
+    os << "\n=== End of Tree Structure ===\n";
+
+    if (__old_buf != nullptr) {
+      os.rdbuf(__old_buf);
     }
-  } // end PrintNodeInfo function
-#endif // BWTREE_AUTODUMP
+  }
+  
+  /*
+   * PrintNodeRecursive() - 递归打印单个节点及其子树
+   * 
+   * 私有辅助函数，用于递归遍历和打印节点
+   */
+  void PrintNodeRecursive(NodeID node_id, std::ostream& os, 
+                         bool show_deltas, int max_depth, 
+                         int current_depth) {
+    if (max_depth >= 0 && current_depth >= max_depth) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Max depth reached]\n";
+      return;
+    }
+    
+    if (node_id == INVALID_NODE_ID) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Invalid Node]\n";
+      return;
+    }
+    
+    // 获取节点
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) {
+      os << std::string(current_depth * 2, ' ') << "└─ [Node " << node_id << " not found]\n";
+      return;
+    }
+    
+    // 打印节点信息，使用树形符号显示层次关系
+    std::string prefix = std::string(current_depth * 2, ' ');
+    std::string node_prefix;
+    
+    if (current_depth == 0) {
+      node_prefix = "Root ";
+    } else if (current_depth == 1) {
+      node_prefix = "├─ ";
+    } else {
+      node_prefix = "│  " + std::string((current_depth - 1) * 2, ' ') + "├─ ";
+    }
+    
+    os << prefix << node_prefix << "Node " << node_id << " (" << GetNodeTypeString(node_p->GetType()) << ")\n";
+    
+    // 打印节点详细信息
+    PrintNodeDetails(node_p, os, show_deltas, current_depth + 1);
+    
+    // 如果是内部节点，递归打印子节点
+    if (node_p->IsInnerNode()) {
+      PrintInnerNodeChildren(node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 如果是delta节点，检查是否有子节点需要遍历
+    if (node_p->IsDeltaNode()) {
+      PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+    
+    // 检查是否有右兄弟节点（通过GetNextNodeID）
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != node_id) {
+      os << std::string(current_depth * 2, ' ') << "  Right Sibling:\n";
+      PrintNodeRecursive(next_id, os, show_deltas, max_depth, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintNodeDetails() - 打印节点的详细信息
+   */
+  void PrintNodeDetails(const BaseNode* node_p, std::ostream& os, 
+                       bool show_deltas, int current_depth) {
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 节点信息放在一行输出
+    os << prefix << "  Type: " << GetNodeTypeString(node_p->GetType()) 
+       << ", Depth: " << node_p->GetDepth() 
+       << ", Item Count: " << node_p->GetItemCount();
+    
+    // 键范围
+    const auto& low_key_pair = node_p->GetLowKeyPair();
+    const auto& high_key_pair = node_p->GetHighKeyPair();
+    os << ", Low Key: " << low_key_pair.first 
+       << ", High Key: " << high_key_pair.first;
+    
+    // 如果是内部节点，显示子节点数量
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      int child_count = 0;
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        if (it->second != INVALID_NODE_ID) child_count++;
+      }
+      os << ", Child Count: " << child_count;
+    }
+    
+    os << "\n";
+    
+    // Delta链信息（如果启用了delta显示）- 集成到节点内部
+    if (show_deltas && node_p->IsDeltaNode()) {
+      os << prefix << "  Delta Chain Info:\n";
+      // 不在这里调用PrintDeltaChain，避免重复
+      // PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintInnerNodeChildren() - 打印内部节点的子节点
+   */
+  void PrintInnerNodeChildren(const BaseNode* inner_node_p, std::ostream& os,
+                              bool /*show_deltas*/, int /*max_depth*/, int current_depth) {
+    if (!inner_node_p || !inner_node_p->IsInnerNode()) return;
+
+    // 进入 epoch，防止遍历期间节点被回收
+    EpochNode *epoch_node_p = epoch_manager.JoinEpoch();
+
+    // 快照键-子节点对，避免并发修改导致迭代器失效
+    const InnerNode* inner_p = static_cast<const InnerNode*>(inner_node_p);
+    auto begin_it = inner_p->Begin();
+    auto end_it = inner_p->End();
+    using PairType = typename std::decay<decltype(*begin_it)>::type;
+    std::vector<PairType> children;
+    for (auto it = begin_it; it != end_it; ++it) {
+      children.push_back(*it);
+    }
+
+    // 仅打印子节点 ID，避免递归与节点访问
+    os << std::string(current_depth * 2, ' ') << "Children (" << children.size() << "):";
+    size_t printed = 0;
+    for (auto const &p : children) {
+      if (p.second == INVALID_NODE_ID) continue;
+      os << ' ' << p.second;
+      if (++printed >= 16) { os << " ..."; break; }
+    }
+    os << '\n';
+
+    epoch_manager.LeaveEpoch(epoch_node_p);
+  }
+
+  /*
+   * PrintDeltaChain() - 打印delta链信息
+   */
+  void PrintDeltaChain(const BaseNode* node_p, std::ostream& os, int current_depth) {
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 显示delta节点的详细信息
+    os << prefix << "    Delta Node Type: " << GetNodeTypeString(node_p->GetType()) << "\n";
+    
+    // 如果有子节点指针，显示子节点信息
+    if (node_p->GetType() == NodeType::InnerInsertType || 
+        node_p->GetType() == NodeType::InnerDeleteType ||
+        node_p->GetType() == NodeType::LeafInsertType ||
+        node_p->GetType() == NodeType::LeafDeleteType) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        os << prefix << "    Child Node Pointer: " << delta_p->child_node_p << "\n";
+        // 显示子节点的基本信息
+        os << prefix << "    Child Node Info:\n";
+        PrintNodeDetails(delta_p->child_node_p, os, false, current_depth + 2);
+      }
+    }
+    
+    // 添加Delta Chain的额外信息
+    os << prefix << "    Delta Chain Status: Active\n";
+    os << prefix << "    Delta Chain Depth: " << current_depth << "\n";
+    
+    // 递归遍历delta链中的所有节点
+    PrintDeltaChainRecursive(node_p, os, true, -1, current_depth);
+  }
+
+  /*
+   * IsNodeInMainTree() - 检查节点是否在主树结构中
+   * 
+   * 通过递归遍历从根节点开始，检查指定节点是否在主树中
+   */
+  bool IsNodeInMainTree(NodeID target_node_id, NodeID current_node_id, 
+                       std::set<NodeID>& visited) {
+    if (target_node_id == current_node_id) return true;
+    if (visited.find(current_node_id) != visited.end()) return false;
+    
+    visited.insert(current_node_id);
+    const BaseNode* node_p = GetNode(current_node_id);
+    if (!node_p) return false;
+    
+    // 如果是内部节点，检查子节点
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID && IsNodeInMainTree(target_node_id, child_id, visited)) {
+          return true;
+        }
+      }
+    }
+    
+    // 检查delta链
+    if (node_p->IsDeltaNode()) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        // 这里我们需要找到child_node_p对应的NodeID
+        // 由于无法直接从指针获取NodeID，我们暂时跳过这个检查
+        // 在实际使用中，可能需要维护一个指针到NodeID的映射
+      }
+    }
+    
+    return false;
+  }
+
+  /*
+   * IsNodeInMainTree() - 重载版本，用于外部调用
+   */
+  bool IsNodeInMainTree(NodeID target_node_id, NodeID current_node_id) {
+    std::set<NodeID> visited;
+    return IsNodeInMainTree(target_node_id, current_node_id, visited);
+  }
+
+  /*
+   * BuildParentChildMap() - 构建父节点到子节点的映射关系
+   * 
+   * 这个函数会递归遍历整个树结构，找出所有节点的父子关系
+   */
+  void BuildParentChildMap(NodeID node_id, std::map<NodeID, std::vector<NodeID>>& parent_child_map, 
+                          const std::set<NodeID>& all_nodes, int max_depth, int current_depth = 0) {
+    if (max_depth >= 0 && current_depth >= max_depth) return;
+    if (node_id == INVALID_NODE_ID) return;
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 如果是内部节点，递归构建子节点关系
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID && all_nodes.find(child_id) != all_nodes.end()) {
+          // 记录父子关系
+          parent_child_map[node_id].push_back(child_id);
+          // 递归构建子节点的关系
+          BuildParentChildMap(child_id, parent_child_map, all_nodes, max_depth, current_depth + 1);
+        }
+      }
+    }
+    
+    // 如果是delta节点，尝试找到delta链中的子节点
+    if (node_p->IsDeltaNode()) {
+      const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+      if (delta_p->child_node_p) {
+        // 由于无法直接从指针获取NodeID，我们暂时跳过这个检查
+        // 在实际使用中，可能需要维护一个指针到NodeID的映射
+      }
+    }
+    
+    // 检查右兄弟节点
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != node_id && all_nodes.find(next_id) != all_nodes.end()) {
+      BuildParentChildMap(next_id, parent_child_map, all_nodes, max_depth, current_depth + 1);
+    }
+  }
+
+  /*
+   * DisplayCompleteTree() - 显示完整的树结构
+   * 
+   * 这个函数会显示所有节点的完整树结构，包括那些可能不在主树中的节点
+   */
+  void DisplayCompleteTree(NodeID node_id, const std::map<NodeID, std::vector<NodeID>>& parent_child_map,
+                          const std::set<NodeID>& all_nodes, std::ostream& os, bool show_deltas, 
+                          int max_depth, int current_depth) {
+    if (max_depth >= 0 && current_depth >= max_depth) return;
+    if (node_id == INVALID_NODE_ID) return;
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 打印当前节点
+    std::string prefix = std::string(current_depth * 2, ' ');
+    std::string node_prefix;
+    
+    if (current_depth == 0) {
+      node_prefix = "Root ";
+    } else if (current_depth == 1) {
+      node_prefix = "├─ ";
+    } else {
+      node_prefix = "│  " + std::string((current_depth - 1) * 2, ' ') + "├─ ";
+    }
+    
+    os << prefix << node_prefix << "Node " << node_id << " (" << GetNodeTypeString(node_p->GetType()) << ")\n";
+    
+    // 打印节点详细信息
+    PrintNodeDetails(node_p, os, show_deltas, current_depth + 1);
+    
+    // 显示子节点
+    auto it = parent_child_map.find(node_id);
+    if (it != parent_child_map.end()) {
+      os << std::string((current_depth + 1) * 2, ' ') << "  Children:\n";
+      
+      const std::vector<NodeID>& children = it->second;
+      for (size_t i = 0; i < children.size(); ++i) {
+        NodeID child_id = children[i];
+        std::string child_prefix;
+        if (i == children.size() - 1) {
+          child_prefix = "└─ ";
+        } else {
+          child_prefix = "├─ ";
+        }
+        
+        os << std::string((current_depth + 2) * 2, ' ') << child_prefix << "Node " << child_id << "\n";
+        
+        // 递归显示子节点
+        DisplayCompleteTree(child_id, parent_child_map, all_nodes, os, show_deltas, max_depth, current_depth + 2);
+      }
+    }
+    
+    // 如果是内部节点，显示子节点信息
+    if (node_p->IsInnerNode()) {
+      PrintInnerNodeChildren(node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 如果是delta节点，显示delta链信息
+    if (node_p->IsDeltaNode()) {
+      PrintDeltaChain(node_p, os, current_depth + 1);
+    }
+  }
+
+  /*
+   * PrintDeltaChainRecursive() - 递归遍历delta链并打印所有节点
+   */
+  void PrintDeltaChainRecursive(const BaseNode* node_p, std::ostream& os, 
+                               bool show_deltas, int max_depth, int current_depth) {
+    if (!node_p || !node_p->IsDeltaNode()) return;
+    
+    std::string prefix = std::string(current_depth * 2, ' ');
+    
+    // 获取delta节点
+    const DeltaNode* delta_p = static_cast<const DeltaNode*>(node_p);
+    
+    // 如果有子节点，递归打印
+    if (delta_p->child_node_p) {
+      os << prefix << "  Delta Chain Child:\n";
+      // 注意：这里我们不能直接传递指针，需要找到对应的NodeID
+      // 或者直接打印子节点的信息
+      PrintNodeDetails(delta_p->child_node_p, os, show_deltas, current_depth + 1);
+    }
+    
+    // 尝试通过GetNextNodeID()访问下一个delta节点
+    NodeID next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != 0) {
+      const BaseNode* next_node_p = GetNode(next_id);
+      if (next_node_p && next_node_p->IsDeltaNode()) {
+        os << prefix << "  Next Delta Node in Chain:\n";
+        PrintNodeDetails(next_node_p, os, show_deltas, current_depth + 1);
+        // 递归继续遍历delta链
+        PrintDeltaChainRecursive(next_node_p, os, show_deltas, max_depth, current_depth + 1);
+      }
+    }
+    
+    // 添加Delta Chain的递归信息
+    os << prefix << "  Delta Chain Recursion Level: " << current_depth << "\n";
+    os << prefix << "  Delta Chain Max Depth: " << max_depth << "\n";
+    
+    // 继续遍历delta链中的下一个节点
+    if (delta_p->child_node_p && delta_p->child_node_p->IsDeltaNode()) {
+      os << prefix << "  Continuing Delta Chain:\n";
+      PrintDeltaChainRecursive(delta_p->child_node_p, os, show_deltas, max_depth, current_depth + 1);
+    }
+    
+    // 尝试通过GetNextNodeID()访问下一个delta节点
+    next_id = node_p->GetNextNodeID();
+    if (next_id != INVALID_NODE_ID && next_id != 0) {
+      const BaseNode* next_node_p = GetNode(next_id);
+      if (next_node_p && next_node_p->IsDeltaNode()) {
+        os << prefix << "  Next Delta Node in Chain (ID: " << next_id << "):\n";
+        PrintNodeDetails(next_node_p, os, show_deltas, current_depth + 1);
+        // 递归继续遍历delta链
+        PrintDeltaChainRecursive(next_node_p, os, show_deltas, max_depth, current_depth + 1);
+      }
+    }
+  }
+
+  /*
+   * GetNodeTypeString() - 将节点类型转换为字符串
+   */
+  std::string GetNodeTypeString(NodeType type) {
+    switch (type) {
+      case NodeType::InnerType: return "Inner";
+      case NodeType::LeafType: return "Leaf";
+      case NodeType::InnerInsertType: return "InnerInsert";
+      case NodeType::InnerDeleteType: return "InnerDelete";
+      case NodeType::InnerSplitType: return "InnerSplit";
+      case NodeType::InnerMergeType: return "InnerMerge";
+      case NodeType::InnerRemoveType: return "InnerRemove";
+      case NodeType::InnerAbortType: return "InnerAbort";
+      case NodeType::LeafInsertType: return "LeafInsert";
+      case NodeType::LeafDeleteType: return "LeafDelete";
+      case NodeType::LeafSplitType: return "LeafSplit";
+      case NodeType::LeafMergeType: return "LeafMerge";
+      case NodeType::LeafRemoveType: return "LeafRemove";
+      default: return "Unknown";
+    }
+  }
+
+  /*
+   * PrintTreeStatistics() - 打印树的统计信息
+   */
+  void PrintTreeStatistics(std::ostream& os = std::cout) {
+    os << "\n=== BwTree Statistics ===\n";
+    
+    NodeID root_id_ = GetRootID();
+    if (root_id_ == INVALID_NODE_ID) {
+      os << "Tree is empty\n";
+      return;
+    }
+    
+    // 统计节点数量和类型
+    std::map<NodeType, int> node_type_counts;
+    std::set<NodeID> visited_nodes;
+    
+    CollectTreeStatistics(root_id_, node_type_counts, visited_nodes);
+    
+    os << "Total Nodes: " << visited_nodes.size() << "\n";
+    os << "Node Type Distribution:\n";
+    for (const auto& pair : node_type_counts) {
+      os << "  " << GetNodeTypeString(pair.first) << ": " << pair.second << "\n";
+    }
+    
+    os << "Next Node ID: " << next_unused_node_id.load() << "\n";
+    os << "=== End of Statistics ===\n";
+  }
+
+  /*
+   * CollectTreeStatistics() - 收集树的统计信息
+   */
+  void CollectTreeStatistics(NodeID node_id, std::map<NodeType, int>& node_type_counts, 
+                           std::set<NodeID>& visited_nodes) {
+    if (node_id == INVALID_NODE_ID || visited_nodes.find(node_id) != visited_nodes.end()) {
+      return;
+    }
+    
+    visited_nodes.insert(node_id);
+    
+    const BaseNode* node_p = GetNode(node_id);
+    if (!node_p) return;
+    
+    // 统计节点类型
+    node_type_counts[node_p->GetType()]++;
+    
+    // 如果是内部节点，递归统计子节点
+    if (node_p->IsInnerNode()) {
+      const InnerNode* inner_p = static_cast<const InnerNode*>(node_p);
+      for (auto it = inner_p->Begin(); it != inner_p->End(); ++it) {
+        NodeID child_id = it->second;
+        if (child_id != INVALID_NODE_ID) {
+          CollectTreeStatistics(child_id, node_type_counts, visited_nodes);
+        }
+      }
+    }
+    
+    // 检查右兄弟节点
+    if (node_p->IsOnLeafDeltaChain()) {
+      NodeID next_id = node_p->GetNextNodeID();
+      if (next_id != INVALID_NODE_ID) {
+        CollectTreeStatistics(next_id, node_type_counts, visited_nodes);
+      }
+    }
+  }
+#endif  // BWTREE_AUTODUMP
 };  // class BwTree
 
 }  // End index/bwtree namespace
