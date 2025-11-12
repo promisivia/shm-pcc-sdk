@@ -28,12 +28,17 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstdint>
 #include <thread>
 #include <unordered_set>
 // offsetof() is defined here
 #include <cstddef>
 #include <cstdio>
 #include <vector>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <atomic>
+#include <iostream>
 
 #include "utils/atomic_variable.h"
 #include "utils/config.h"
@@ -58,7 +63,7 @@
  * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
  * 默认关闭，如需开启请在编译命令或此处取消注释
  */
-#define BWTREE_AUTODUMP
+// #define BWTREE_AUTODUMP
 
 #ifdef BWTREE_PELOTON
 
@@ -138,21 +143,19 @@ static void dummy(const char *, ...) {}
 
 #ifdef BWTREE_DEBUG
 
-// #define bwt_printf(fmt, ...)                                          \
-//   do {                                                                \
-//     if (print_flag == false) break;                                   \
-//     fprintf(stderr, "%-24s(%8lX): " fmt, __FUNCTION__,                \
-//             std::hash<std::thread::id>()(std::this_thread::get_id()), \
-//             ##__VA_ARGS__);                                           \
-//     fflush(stdout);                                                   \
-//   } while (0);
+static inline pid_t get_thread_id() {
+  #if defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 30
+      return gettid();
+  #else
+      return syscall(SYS_gettid);
+  #endif
+  }
 
-#define bwt_printf(fmt, ...)                                          \
-  do {                                                                \
-    fprintf(stderr, "%-24s(%8lX): " fmt, __FUNCTION__,                \
-            std::hash<std::thread::id>()(std::this_thread::get_id()), \
-            ##__VA_ARGS__);                                           \
-    fflush(stdout);                                                   \
+#define bwt_printf(fmt, ...)                                                    \
+  do {                                                                          \
+    fprintf(stderr, "%s:%d: %-24s(%d): " fmt, __FILE__, __LINE__, __FUNCTION__, \
+            gettid(), ##__VA_ARGS__);                                           \
+    fflush(stdout);                                                             \
   } while (0);
 
 #else
@@ -167,6 +170,9 @@ static void dummy(const char *, ...) {}
 // This could not be set as a macro since we will change the flag inside
 // the testing framework
 extern bool print_flag;
+extern CallCounter* full_counter;
+extern CallCounter* half_counter;
+extern CallCounter* traverse_counter;
 
 // This constant represents INVALID_NODE_ID which is used as an indication
 // that the node is actually the last node on that level
@@ -430,13 +436,13 @@ protected:
 
     // Manually call destructor
     for (size_t i = 0; i < thread_num; i++) {
-      assert((gc_metadata_p + i)->data.header.next_p == nullptr);
+      // assert((gc_metadata_p + i)->data.header.next_p == nullptr);
 
       (gc_metadata_p + i)->~PaddedGCMetadata();
     }
 
     // Free memory using original pointer rather than adjusted pointer
-    cacheable.free(original_p);
+    // cacheable.free(original_p);
 
     return;
   }
@@ -454,7 +460,7 @@ protected:
     // for doing alignment
     {
 #ifndef NT_SIM
-      size_t malloc_size = cl_size * (thread_num + 1);
+      size_t malloc_size = cl_size * 2 * (thread_num + 1);
 #else
       size_t malloc_size = cl_size * 3 * (thread_num + 1);
 #endif
@@ -608,7 +614,7 @@ protected:
   inline void IncreaseEpoch() {
     epoch++;
 #if defined(NO_CC) && defined(OPT_GC)
-    uint64_t min_epoch = 0;
+    uint64_t min_epoch = std::numeric_limits<uint64_t>::max();
     // when increase epoch, we need to update all thread's last_active_epoch
     for (int i = 0; i < static_cast<int>(thread_num); i++) {
       auto meta = GetGCMetaData(i);
@@ -647,7 +653,7 @@ protected:
    *                      for GC
    */
   inline void UnregisterThread(int thread_id) {
-    GetGCMetaData(thread_id)->last_active_epoch = static_cast<uint64_t>(-1);
+    GetGCMetaData(thread_id)->last_active_epoch.store(std::numeric_limits<uint64_t>::max());
   }
 
   /*
@@ -1329,9 +1335,7 @@ class BwTree : public BwTreeBase {
     // /*
     //  * DeConstructor - Initialize type and metadata
     //  */
-    // virtual ~BaseNode() {
-    //   printf("Release node %p\n", this);
-    // }
+    virtual ~BaseNode() { }
 
     /*
      * GetType() - Return the type of node
@@ -1495,6 +1499,9 @@ class BwTree : public BwTreeBase {
     const BaseNode *child_node_p;
 
     void FlushNode() const override { clwb(this, sizeof(DeltaNode)); }
+
+    virtual ~DeltaNode() {
+    }
 
     /*
      * Constructor
@@ -2882,6 +2889,11 @@ class BwTree : public BwTreeBase {
     bwt_printf(
         "Bw-Tree Constructor called. "
         "Setting up execution environment...\n");
+    #ifdef BWTREE_RETRY_COUNT
+    full_counter = new CallCounter("bwtree_retry_count");
+    half_counter = new CallCounter("bwtree_half_retry_count");
+    traverse_counter = new CallCounter("bwtree_traverse_count");
+    #endif
 
     InitMappingTable();
     InitNodeLayout();
@@ -2915,6 +2927,12 @@ class BwTree : public BwTreeBase {
     bwt_printf("Next node ID at exit: %lu\n", next_unused_node_id.load());
     bwt_printf("Destructor: Free tree nodes\n");
 
+    #ifdef BWTREE_RETRY_COUNT
+    delete full_counter;
+    delete half_counter;
+    delete traverse_counter;
+    #endif
+
     // Clear all garbage nodes awaiting cleaning
     // First of all it should set all last active epoch counter to -1
     ClearThreadLocalGarbage();
@@ -2943,17 +2961,18 @@ class BwTree : public BwTreeBase {
       UnregisterThread(i);
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     for (size_t i = 0; i < GetThreadNum(); i++) {
       // Here all epoch counters have been set to 0xFFFFFFFFFFFFFFFF
       // so GC should always succeed
 #ifndef NT_SIM
 // FIXME(FN): disable performing GC to avoid bugs
-      // PerformGC(i);
+      PerformGC(i);
 #endif
 
       // This will collect all nodes since we have adjusted the currenr thread
       // GC ID
-      assert(GetGCMetaData(i)->node_count == 0);
     }
 
     return;
@@ -3007,6 +3026,7 @@ class BwTree : public BwTreeBase {
 // #endif
 #if defined(NO_CC)
     mapping_table[node_id].store(nullptr);
+    bwt_printf("WARN: Successfully free node ID = %lu\n", node_id);
 #else
     mapping_table[node_id] = nullptr;
 #endif
@@ -3039,6 +3059,7 @@ class BwTree : public BwTreeBase {
 // #endif
 #ifdef NO_CC
     mapping_table[node_id].store(nullptr);
+    bwt_printf("WARN: Successfully invalidate node ID = %lu\n", node_id);
 #else
     mapping_table[node_id] = nullptr;
 #endif
@@ -3152,6 +3173,7 @@ class BwTree : public BwTreeBase {
           // NOTE: No need to call InvalidateNodeID since this function is
           // only called on destruction of the tree
           mapping_table[((InnerDeleteNode *)node_p)->item.second] = nullptr;
+          bwt_printf("WARN: Successfully set Null to Node ID = %lu\n", ((InnerDeleteNode *)node_p)->item.second);
 
           ((InnerDeleteNode *)node_p)->~InnerDeleteNode();
           freed_count++;
@@ -3421,6 +3443,10 @@ class BwTree : public BwTreeBase {
 #endif
 #endif
 
+    if (node_p == nullptr) {
+      bwt_printf("WARN: Node Pointer is nullptr for Node ID = %lu\n", node_id);
+    }
+
 #ifdef OPT_ROOT_READ
     ret = mapping_table[node_id].compare_exchange_strong(prev_p, node_p);
     if (!ret) {
@@ -3492,7 +3518,7 @@ class BwTree : public BwTreeBase {
    * installation would always succeed
    */
   inline void InstallNewNode(NodeID node_id, const BaseNode *node_p) {
-      bwt_printf("node_id %lu, node_p %p\n", node_id, node_p);
+      bwt_printf("New Node: Node ID = %lu, Node Pointer = %p\n", node_id, node_p);
 #ifdef NO_CC
 #ifndef NO_CC_WO_FLUSH_NODE
     node_p->FlushNode();
@@ -3501,6 +3527,9 @@ class BwTree : public BwTreeBase {
 
 #if defined(NO_CC)
     mapping_table[node_id].store(node_p);
+    if (node_p == nullptr) {
+      bwt_printf("WARN: Node Pointer is nullptr for Node ID = %lu\n", node_id);
+    }
 #else
     mapping_table[node_id] = node_p;
 #endif
@@ -3539,16 +3568,18 @@ class BwTree : public BwTreeBase {
         if (cached->IsOnLeafDeltaChain()) {
           ret = mapping_table[node_id].load();
           CatchupLocalCacheMappingTable(node_id, ret);
+          assert(ret != nullptr);
           return ret;
         }
-        if (cached != mapping_table[node_id].load()) {
-          std::cout << "cached != mapping_table[node_id].load() for node_id " << node_id << std::endl;
-        }
+        // if (cached != mapping_table[node_id].load()) {
+        //   std::cout << "cached != mapping_table[node_id].load() for node_id " << node_id << std::endl;
+        // }
         return cached;
       } else {    // else, cached is nullptr, meaning that the node is not cached
         // update cache to mapping_table
         ret = mapping_table[node_id].load();
         CatchupLocalCacheMappingTable(node_id, ret);
+        assert(ret != nullptr);
         return ret;
       }
     }
@@ -3644,9 +3675,20 @@ class BwTree : public BwTreeBase {
     }
 
     // printf("Root ID = %lu, node_p = %p\n", start_node_id, context_p->current_snapshot.node_p);
-    bwt_printf("Successfully loading root node ID\n");
+    // bwt_printf("Successfully loading root node ID retrying_slow_path %d\n", context_p->retrying_slow_path);
 
     while (1) {
+      // This is the node we have just loaded
+      NodeSnapshot *snapshot_p = GetLatestNodeSnapshot(context_p);
+
+      if (snapshot_p->IsLeaf() == true) {
+        bwt_printf("The next node is a leaf\n");
+
+        break;
+      } else {
+        bwt_printf("The next node is not a leaf\n");
+      }
+
       NodeID child_node_id = NavigateInnerNode(context_p);
 
       // Navigate could abort since it might go to another NodeID
@@ -3684,13 +3726,13 @@ class BwTree : public BwTreeBase {
       }
 
       // This is the node we have just loaded
-      NodeSnapshot *snapshot_p = GetLatestNodeSnapshot(context_p);
+      // NodeSnapshot *snapshot_p = GetLatestNodeSnapshot(context_p);
 
-      if (snapshot_p->IsLeaf() == true) {
-        bwt_printf("The next node is a leaf\n");
+      // if (snapshot_p->IsLeaf() == true) {
+      //   bwt_printf("The next node is a leaf\n");
 
-        break;
-      }
+      //   break;
+      // }
     }  // while(1)
 
     if (value_p == nullptr) {
@@ -3814,7 +3856,7 @@ class BwTree : public BwTreeBase {
           int tmp_root_id = global_root_id.load();
           const void *tmp_root_ptr =
               mapping_table[tmp_root_id].load(std::memory_order_seq_cst, true);
-          GetCurrentMetaData()->cached_root_id = global_root_id.load(std::memory_order_seq_cst, true);
+          GetCurrentMetaData()->cached_root_id.store(global_root_id.load(std::memory_order_seq_cst, true));
           GetCurrentMetaData()->cached_root_node_p.store(tmp_root_ptr);
           context_p->abort_flag = true;
 
@@ -4006,9 +4048,23 @@ class BwTree : public BwTreeBase {
 
 #ifdef OPT_IN_USE_FLAG
     if (!context_p->retrying_slow_path) {
-      if (snapshot_p->IsLeaf() == false || snapshot_p->node_id == INVALID_NODE_ID || snapshot_p->node_p == nullptr) {
+      if (!(snapshot_p->IsLeaf() == false && snapshot_p->node_id != INVALID_NODE_ID && snapshot_p->node_p != nullptr)) {
         context_p->need_retry_slow_path = true;
+        bwt_printf("set need_retry_slow_path to true return INVALID_NODE_ID\n");
         return INVALID_NODE_ID;
+      }
+    } else {
+      if (snapshot_p->IsLeaf() != false) {
+        bwt_printf("Error: NavigateInnerNode: snapshot_p->IsLeaf() != false\n");
+        assert(false);
+      }
+      if (snapshot_p->node_id == INVALID_NODE_ID) {
+        bwt_printf("Error: NavigateInnerNode: snapshot_p->node_id == INVALID_NODE_ID\n");
+        assert(false);
+      }
+      if (snapshot_p->node_p == nullptr) {
+        bwt_printf("Error: NavigateInnerNode: snapshot_p->node_p == nullptr\n");
+        assert(false);
       }
     }
 #else
@@ -4156,7 +4212,7 @@ class BwTree : public BwTreeBase {
           continue;
         }  // InnerMergeType
         default: {
-          bwt_printf("ERROR: Unknown node type = %d", static_cast<int>(type));
+          bwt_printf("ERROR: Unknown node type = %d\n", static_cast<int>(type));
 
           assert(false);
         }
@@ -5761,7 +5817,7 @@ class BwTree : public BwTreeBase {
    */
   void TakeNodeSnapshot(NodeID node_id, Context *context_p, bool bypass_cache) {
     const BaseNode *node_p = GetNode(node_id, bypass_cache);
-    bwt_printf("Taking snapshot of NodeID = %lu, Node_p = %p\n", node_id, node_p);
+    bwt_printf("Taking snapshot of Node ID = %lu, Node Pointer = %p\n", node_id, node_p);
 
     bwt_printf("Is leaf node? - %d\n", node_p->IsOnLeafDeltaChain());
 
@@ -5988,6 +6044,8 @@ class BwTree : public BwTreeBase {
     const BaseNode *node_p = GetNode(node_id, context_p->retrying_slow_path);
     if (node_p == nullptr) {
       // node in global mapping table is also NULL, so we need to retry slow path
+      // FIXME(yjs)
+      assert(context_p->retrying_slow_path == false);
       context_p->need_retry_slow_path = true;
     }
 #else
@@ -6131,6 +6189,16 @@ class BwTree : public BwTreeBase {
 
   void TraverseReadOptimized(Context *context_p,
                              std::vector<ValueType> *value_list_p) {
+  std::vector<NodeID> node_id_path;
+  auto print_path = [&]() {
+    std::cout << (uint64_t)gettid() << " Node ID path: ";
+    for (auto node_id : node_id_path) {
+      auto node_p = GetNode(node_id, true);
+      std::cout << (int)node_p->GetType() << " " << node_id << " -> ";
+    }
+    std::cout << std::endl;
+    std::cout.flush();
+  };
   retry_traverse:
     assert(context_p->abort_flag == false);
 #ifdef BWTREE_DEBUG
@@ -6213,6 +6281,7 @@ class BwTree : public BwTreeBase {
 
       // This is the node we have just loaded
       NodeSnapshot *snapshot_p = GetLatestNodeSnapshot(context_p);
+      node_id_path.push_back(snapshot_p->node_id);
 
       if (snapshot_p->IsLeaf() == true) {
         bwt_printf("The next node is a leaf (RO)\n");
@@ -6230,9 +6299,11 @@ class BwTree : public BwTreeBase {
         NavigateLeafNode(context_p, *value_list_p);
 #ifdef OPT_IN_USE_FLAG
         // if value is not found, should retry slow path
-        if (value_list_p->size() == 0) {
+        if (value_list_p->size() == 0 && context_p->retrying_slow_path == false) {
           context_p->need_retry_slow_path = true;
           goto retry_slow_path_traverse;
+        } else {
+          return;
         }
 #endif
 
@@ -6269,6 +6340,7 @@ class BwTree : public BwTreeBase {
         // If there is no abort then we could safely return
         return;
       }
+      // print_path();
 
       // This does not work
       //_mm_prefetch(&context_p->current_snapshot.node_p->GetLowKeyPair(),
@@ -6729,8 +6801,8 @@ class BwTree : public BwTreeBase {
           // catchup new root node
           uint64_t tmp_root_id = global_root_id.load();
           if (GetRootID() != tmp_root_id) {
-            GetCurrentMetaData()->cached_root_id = tmp_root_id;
-            GetCurrentMetaData()->cached_root_node_p = mapping_table[tmp_root_id];
+            GetCurrentMetaData()->cached_root_id.store(tmp_root_id);
+            GetCurrentMetaData()->cached_root_node_p.store(mapping_table[tmp_root_id]);
             context_p->abort_flag = true;
             return;
           }
@@ -8013,7 +8085,7 @@ class BwTree : public BwTreeBase {
    * If CAS fails this function retries until it succeeds
    */
   bool Insert(const KeyType &key, const ValueType &value) {
-    bwt_printf("Insert called\n");
+    bwt_printf("Insert called %lu\n", key);
 
 #ifdef BWTREE_DEBUG
     insert_op_count.fetch_add(1);
@@ -8268,12 +8340,6 @@ class BwTree : public BwTreeBase {
     return true;
   }
 
-  #ifdef BWTREE_RETRY_COUNT
-  CallCounter* full_counter = new CallCounter("bwtree_retry_count");
-  CallCounter* half_counter = new CallCounter("bwtree_half_retry_count");
-  CallCounter* traverse_counter = new CallCounter("bwtree_traverse_count");
-  #endif
-
   /*
    * GetValue() - Fill a value list with values stored
    *
@@ -8285,7 +8351,7 @@ class BwTree : public BwTreeBase {
    */
 
   void GetValue(const KeyType &search_key, std::vector<ValueType> &value_list) {
-    bwt_printf("GetValue()\n");
+    bwt_printf("GetValue for key %lu\n", search_key);
 
 #ifdef BWTREE_RETRY_COUNT
     traverse_counter->Increment();
@@ -8325,7 +8391,7 @@ retry_read:
    * remove this method
    */
   ValueSet GetValue(const KeyType &search_key) {
-    bwt_printf("GetValue()\n");
+    bwt_printf("GetValue for key %lu\n", search_key);
 
     EpochNode *epoch_node_p = epoch_manager.JoinEpoch();
 
@@ -10095,7 +10161,7 @@ retry_read:
       // Use current thread's gc id to perform GC
 #ifndef NT_SIM
 // FIXME(FN): disable performing GC to avoid bugs
-      // PerformGC(gc_id);
+      PerformGC(gc_id);
 #endif
     }
 
@@ -10117,7 +10183,7 @@ retry_read:
     // First of all get the minimum epoch of all active threads
     // This is the upper bound for deleted epoch in garbage node
 #if defined(NO_CC) && defined(OPT_GC)
-    uint64_t min_epoch = SummarizeGCEpoch2(thread_id) - 1;
+    uint64_t min_epoch = SummarizeGCEpoch2(thread_id);
 #else
     uint64_t min_epoch = SummarizeGCEpoch();
 #endif

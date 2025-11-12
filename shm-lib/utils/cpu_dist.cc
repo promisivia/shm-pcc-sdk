@@ -1,14 +1,16 @@
 #include "utils/cpu_dist.h"
 
 #include <pthread.h>
+#include <numa.h>
 
 #include <cassert>
-#include <iostream>
+#include <cstdio>
+#include <sched.h>
 
 int get_first_cpu_of_numa_node(int node) {
   struct bitmask *cpumask = numa_allocate_cpumask();
   if (numa_node_to_cpus(node, cpumask) != 0) {
-    std::cerr << "Failed to get CPUs for NUMA node " << node << std::endl;
+    printf("Failed to get CPUs for NUMA node %d\n", node);
     numa_free_cpumask(cpumask);
     return -1;
   }
@@ -50,16 +52,16 @@ int get_available_cpu_server() {
   return next_cpu;
 }
 
-int set_pthread_affinity_attr(int cpu, pthread_attr_t &attr) {
-  pthread_attr_init(&attr);
+int set_pthread_affinity_attr(int cpu, pthread_attr_t *attr) {
+  pthread_attr_init(attr);
 
   cpu_set_t cpuset;
   CPU_ZERO(&cpuset);
   CPU_SET(cpu, &cpuset);
 
-  int rc = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
+  int rc = pthread_attr_setaffinity_np(attr, sizeof(cpu_set_t), &cpuset);
   if (rc != 0) {
-    std::cerr << "Error setting thread affinity to CPU " << cpu << std::endl;
+    printf("Error setting thread affinity to CPU %d\n", cpu);
     return rc;
   }
   return 0;
@@ -74,8 +76,7 @@ int set_pthread_affinity(int cpu) {
 
   int rc = pthread_setaffinity_np(tid, sizeof(cpu_set_t), &cpuset);
   if (rc != 0) {
-    std::cerr << "Error setting thread affinity for thread " << tid
-              << " to CPU " << cpu << std::endl;
+    printf("Error setting thread affinity for thread %ld to CPU %d\n", tid, cpu);
     return rc;
   }
   return 0;

@@ -48,7 +48,7 @@ public:
     for (uint32_t i = mid * dispatcher_per_machine;
          i < (mid + 1) * dispatcher_per_machine; i++) {
 #ifndef SNIPER
-      pthread_attr_t attr;
+      pthread_attr_t *attr = new pthread_attr_t;
       int cpu_id;
 #ifdef USE_MSG_QUEUE
       // 在使用消息队列时，将client线程绑到节点0，线程池的其他线程绑到节点123
@@ -58,7 +58,7 @@ public:
       cpu_id = cpu_allocator.allocate_cpu(1);
 #endif
       set_pthread_affinity_attr(cpu_id, attr);
-      pthread_create(&threads_[i], &attr,
+      pthread_create(&threads_[i], attr,
                      &TransactionThreadController::DelegateClientTransWrapper,
                      (void *)&thread_args_[i]);
 #else
@@ -78,9 +78,16 @@ public:
     for (uint32_t i = mid * dispatcher_per_machine;
          i < (mid + 1) * dispatcher_per_machine; i++) {
       void *tmp;
-      pthread_join(threads_[i], &tmp);
-      sum += *(int *)tmp;
-      delete (int *)tmp;
+      int ret = pthread_join(threads_[i], &tmp);
+      if (ret != 0) {
+        std::cerr << "pthread_join failed, thread id: " << i << std::endl;
+      }
+      if (tmp != nullptr) {
+        sum += *(int *)tmp;
+        delete (int *)tmp;
+      } else {
+        std::cerr << "pthread_join returned nullptr, thread id: " << i << std::endl;
+      }
     }
     finish_flags[SimThreadInfo::worker_machine_id].store(
         1, std::memory_order_release);

@@ -2,7 +2,6 @@
 
 #include <numa.h>
 #include <iostream>
-#include <numa.h>
 #include <numaif.h>
 #include <set>
 #include <unistd.h>
@@ -19,7 +18,7 @@ int get_first_cpu_of_numa_node(int node);
 int get_available_cpu_server();
 
 // Set the pthread_attr_t to the specific CPU
-int set_pthread_affinity_attr(int cpu, pthread_attr_t &attr);
+int set_pthread_affinity_attr(int cpu, pthread_attr_t *attr);
 
 // Set current thread cpu affinity to the specific CPU
 int set_pthread_affinity(int cpu);
