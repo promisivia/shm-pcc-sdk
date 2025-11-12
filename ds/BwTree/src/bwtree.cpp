@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "bwtree.h"
+#include "utils/timing.h"
 
 #ifdef BWTREE_PELOTON
 namespace peloton {
@@ -34,6 +35,10 @@ std::mutex dump_mutex;
 thread_local int BwTreeBase::gc_id = -1;
 
 std::atomic<size_t> BwTreeBase::total_thread_num{0UL};
+
+CallCounter* full_counter{nullptr};
+CallCounter* half_counter{nullptr};
+CallCounter* traverse_counter{nullptr};
 
 }  // End index/bwtree namespace
 }  // End peloton/wangziqi2013 namespace

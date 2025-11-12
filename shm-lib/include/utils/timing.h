@@ -20,7 +20,6 @@
 // #define BWTREE_RETRY_COUNT
 // #define CLEVEL_DOUBLE_READ_COUNT
 // #define TRX_TYPE_STAT
-// #define BWTREE_RETRY_COUNT
 
 /*
  * class Timer - Measures time usage for testing purpose

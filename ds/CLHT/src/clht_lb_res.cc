@@ -529,11 +529,11 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 #endif
                 empty->store(key);
                 #else
-                empty_v = (clht_val_t*) &bucket->val[j];
+                *empty_v = val;
                 #ifdef PERSIST
                 clflush((char *)empty_v, sizeof(clht_val_t), false, true);
                 #endif
-                empty = (clht_addr_t*) &bucket->key[j];
+                *empty = key;
                 #endif
             }
 #ifdef NO_CC
