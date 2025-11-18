@@ -1,0 +1,3 @@
+/states
+*.out
+test_linearizability

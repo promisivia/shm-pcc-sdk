@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread
-TARGET = test_help_update
-SOURCES = test_help_update.cc
+TARGET = test_linearizability
+SOURCES = test_linearizability.cc
 
 all: $(TARGET)
 
@@ -15,6 +15,3 @@ run: $(TARGET)
 	./$(TARGET)
 
 .PHONY: all clean run
-
-
-
