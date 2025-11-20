@@ -56,7 +56,7 @@ if(VARIANT STREQUAL "limit_atomic")
 endif()
 
 add_db("bwtree_db.cc" "BwTree" "bwtree" "ENABLE_BWTREE_DB" "PUBLIC")
-add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
+# add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
 # add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
 # add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
 # add_db("level_hash_db.cc" "Level-Hashing" "levelhash" "ENABLE_LEVEL_HASH_DB" "PUBLIC")
