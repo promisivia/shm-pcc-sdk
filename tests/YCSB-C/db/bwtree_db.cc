@@ -19,6 +19,7 @@ int ThreadPool::pool_index = 0;
 
 BwTreeDB::BwTreeDB(int thread_num)
     : DB(), tree(GetEmptyTree(true)), thread_num(thread_num), bits(thread_num) {
+  printf("BwTreeDB constructor: thread_num=%d\n", thread_num);
 #ifdef NT_SIM
   SimThreadInfo::setup_worker_db_id();
 #endif
@@ -52,25 +53,29 @@ void BwTreeDB::Close() {
 }
 
 int BwTreeDB::PoolThreadInit() {
-  int thread_id = allocate();
+  // int thread_id = allocate();
+  int thread_id = SimThreadInfo::worker_thread_id;
+  // printf("BwTreeDB::PoolThreadInit: thread_id=%d\n", thread_id);
   tree->AssignGCID(thread_id);
   return thread_id;
 }
 
 void BwTreeDB::PoolThreadClose(int thread_id) {
   tree->UnregisterThread(thread_id);
-  release(thread_id);
+  // release(thread_id);
 }
 
 int BwTreeDB::ThreadInit() {
-  int thread_id = allocate();
+  // int thread_id = allocate();
+  int thread_id = SimThreadInfo::worker_thread_id;
+  // printf("BwTreeDB::ThreadInit: thread_id=%d\n", thread_id);
   tree->AssignGCID(thread_id);
   return thread_id;
 }
 
 void BwTreeDB::ThreadClose(int thread_id) {
   tree->UnregisterThread(thread_id);
-  release(thread_id);
+  // release(thread_id);
 }
 
 int BwTreeDB::Read(const std::string& table, const std::string& key,
