@@ -1,4 +1,7 @@
 #include "core/properties.h"
+#include <cstdint>
+
+uint32_t VALUE_ADDR_SIZE = 0;
 
 namespace utils {
 std::string ParseCommandLine(int argc, const char *argv[],
@@ -135,6 +138,14 @@ std::string ParseCommandLine(int argc, const char *argv[],
     } else if (strcmp(argv[argindex], "-C") == 0) {
       argindex++;
       props.SetProperty("config_file", argv[argindex]);
+      argindex++;
+    } else if (strcmp(argv[argindex], "-valuesize") == 0) {
+      argindex++;
+      if (argindex >= argc) {
+        UsageMessage(argv[0]);
+        exit(0);
+      }
+      props.SetProperty("valuesize", argv[argindex]);
       argindex++;
     } else {
       std::cout << "Unknown option '" << argv[argindex] << "'" << std::endl;

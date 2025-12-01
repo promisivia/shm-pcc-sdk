@@ -57,7 +57,7 @@ std::string FollowerManager::get_user_name() {
 
 void SSHConnection::build_ssh_connection(const char *host, const char *user) {
   session = ssh_new();
-  int verbosity = SSH_LOG_WARNING;
+  int verbosity = SSH_LOG_NOLOG;
   if (session == nullptr) {
     perror("ssh_new error");
     exit(EXIT_FAILURE);

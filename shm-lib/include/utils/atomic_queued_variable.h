@@ -117,6 +117,7 @@ public:
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
          bool nt = true) const {
+    // TODO(yjs): eval
     if (nt) {
       AtomicRequestQueue::pend_load_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }
@@ -126,6 +127,7 @@ public:
 
   void store(T newValue, std::memory_order __m = std::memory_order_seq_cst,
              bool nt = true) {
+    // TODO(yjs): eval
     if (nt) {
       AtomicRequestQueue::pend_store_req(const_cast<const void*>(static_cast<const volatile void*>(&value)));
     }

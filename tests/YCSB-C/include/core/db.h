@@ -77,8 +77,16 @@ class DB {
   template <typename Func, typename... Args>
   int AsyncExecute(Func func, std::atomic<int> &finish, int &result, Args &&...args) {
     auto tmp_result = (std::remove_reference_t<decltype(result)>*)cacheable.malloc(sizeof(std::remove_reference_t<decltype(result)>));
+
     auto task = [tmp_result, &finish, func, args...]() mutable {
+    #ifdef MSG_FUNC_TIMING
+      TimerAverage timer("msg_timing_func");
+      timer.Start();
+    #endif
       *tmp_result = func(std::forward<Args>(args)...);
+    #ifdef MSG_FUNC_TIMING
+      timer.Stop();
+    #endif
       finish.store(1, std::memory_order_release);
     };
     result = *tmp_result;
