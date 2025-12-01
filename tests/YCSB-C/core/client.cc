@@ -187,7 +187,9 @@ int Client::TransactionScan(Operation &op) {
     cur_element_nr += result.size();
   }
 #else
-  throw "Scan: function not implemented!";
+  uint32_t db_index = get_db(op.key);
+  std::vector<std::vector<DB::KVPair>> result;
+  return db_[db_index]->ScanInternal(op.key, op.len, result);
 #endif
   return ret;
 }

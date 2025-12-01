@@ -59,6 +59,9 @@ class BTreeDB : public DB {
 
   int DeleteInternal(uint64_t key) override;
 
+  int ScanInternal(uint64_t key, int len,
+    std::vector<std::vector<KVPair>>& result) override;
+
   void InitStats() override;
   void GetStats() override;
 

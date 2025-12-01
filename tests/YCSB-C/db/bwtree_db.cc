@@ -55,7 +55,7 @@ void BwTreeDB::Close() {
 int BwTreeDB::PoolThreadInit() {
   // int thread_id = allocate();
   int thread_id = SimThreadInfo::worker_thread_id;
-  // printf("BwTreeDB::PoolThreadInit: thread_id=%d\n", thread_id);
+  // fprintf(stderr, "BwTreeDB::PoolThreadInit: thread_id=%d\n", thread_id);
   tree->AssignGCID(thread_id);
   return thread_id;
 }
@@ -123,6 +123,20 @@ int BwTreeDB::ReadInternal(uint64_t key, uint64_t &value) {
     return DB::kErrorNoData;
   }
   value = val[0];
+  return DB::kOK;
+}
+
+int BwTreeDB::ScanInternal(uint64_t key, int len,
+  std::vector<std::vector<KVPair>>& result) {
+  auto element_iterator = tree->Begin(key);
+  for (int i = 0; i < len; i++) {
+    if (element_iterator.IsEnd()) {
+      break;
+    }
+    auto& element = *element_iterator;
+    result.emplace_back();
+    element_iterator++;
+  }
   return DB::kOK;
 }
 

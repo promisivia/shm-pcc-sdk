@@ -146,6 +146,11 @@ class DB {
     return -1;
   };
 
+  virtual int ScanInternal(uint64_t key, int len,
+    std::vector<std::vector<KVPair>>& result) {
+    return -1;
+  }
+
   ///
   /// Updates a record in the database.
   /// Field/value pairs in the specified vector are written to the record,

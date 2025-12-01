@@ -5,13 +5,7 @@
 #include "core/db.h"
 #include "utils/config.h"
 #include "shm/cxl_type.h"
-#ifdef LOCAL_NO_CC
-// #ifdef NO_CC
-#include "libpmemobj++/experimental/clevel_hash.hpp"
-#else
-#include "libpmemobj++/experimental/clevel_hash_original.hpp"
-namespace nvobj = pmem::obj;
-#endif
+#include "clevel_hash.hpp"
 
 namespace ycsbc {
 
