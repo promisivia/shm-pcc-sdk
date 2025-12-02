@@ -26,8 +26,8 @@ class BTreeOLCDB : public DB {
   void Init() override;
   void Close() override;
 
-  int PoolThreadInit();
-  void PoolThreadClose(int thread_id);
+  int PoolThreadInit() override;
+  void PoolThreadClose(int thread_id) override;
 
   int Read(const std::string& table, const std::string& key,
            const std::vector<std::string>* fields, std::vector<KVPair>& result) override;

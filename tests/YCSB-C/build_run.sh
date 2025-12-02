@@ -1,3 +1,5 @@
+#!/usr/bin/env bash
+
 PASSWORD=ipads123
 
 
@@ -244,6 +246,16 @@ task_latency_overhead() {
     done
 }
 
+task_various_value_size() {
+    dir=./log/various_value_size
+    mkdir -p $dir
+    configs=("cc" "nocc" "nocc_no_opt" "cc_nocc_mq")
+    for config in "${configs[@]}"; do
+        ./build.sh "${config}"
+        ./run_shm_ds.sh -mode=various-value-size 2>&1 | tee $dir/${config}.log
+    done
+}
+
 echo $PASSWORD | sudo -S ./prepare_env.sh
 
 # task_msg_queue
@@ -262,5 +274,6 @@ echo $PASSWORD | sudo -S ./prepare_env.sh
 # task_bwtree_breakdown
 # task_sherman_indivi
 # task_latency_overhead
+task_various_value_size
 
 echo $PASSWORD | sudo -S ./reset_env.sh

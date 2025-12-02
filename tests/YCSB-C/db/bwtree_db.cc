@@ -76,6 +76,7 @@ void BwTreeDB::ThreadClose(int thread_id) {
   // release(thread_id);
 }
 
+[[deprecated("Use ReadInternal instead.")]]
 int BwTreeDB::Read(const std::string& table, const std::string& key,
                    const std::vector<std::string>* fields,
                    std::vector<KVPair>& result) {
@@ -138,6 +139,7 @@ int BwTreeDB::ScanInternal(uint64_t key, int len,
   return DB::kOK;
 }
 
+[[deprecated("Use ScanInternal instead.")]]
 int BwTreeDB::Scan(const std::string& table, const std::string& key, int len,
                    const std::vector<std::string>* fields,
                    std::vector<std::vector<KVPair>>& result) {
@@ -193,6 +195,7 @@ int BwTreeDB::Scan(const std::string& table, const std::string& key, int len,
   return DB::kOK;
 }
 
+[[deprecated("Use UpdateInternal instead.")]]
 int BwTreeDB::Update(const std::string& table, const std::string& key,
                      std::vector<KVPair>& values) {
   bool finish = false;
@@ -235,6 +238,7 @@ int BwTreeDB::UpdateInternal(uint64_t key, uint64_t value) {
   return ret;
 }
 
+[[deprecated("Use InsertInternal instead.")]]
 int BwTreeDB::Insert(const std::string& table, const std::string& key,
                      std::vector<KVPair>& values) {
   bool finish = false;
@@ -275,6 +279,7 @@ int BwTreeDB::InsertInternal(uint64_t key, uint64_t value) {
   return ret;
 }
 
+[[deprecated("Use DeleteInternal instead.")]]
 int BwTreeDB::Delete(const std::string& table, const std::string& key) {
   bool finish = false;
   auto task = [this, key, &finish]() {

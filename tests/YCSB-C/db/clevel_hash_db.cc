@@ -1,10 +1,6 @@
 #include "db/clevel_hash_db.h"
 
 #include <cstdint>
-#include <filesystem>
-
-#include "utils/sim_id.h"
-#include "core/utils.h"
 
 namespace ycsbc {
 CLevelHashDB::CLevelHashDB(int thread_num)
@@ -138,6 +134,7 @@ void CLevelHashDB::PoolThreadClose(int thread_id) {
   release(thread_id);
 }
 
+[[deprecated("Use ReadInternal instead.")]]
 int CLevelHashDB::Read(uint64_t key, uint64_t &value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -168,6 +165,7 @@ int CLevelHashDB::Read(uint64_t key, uint64_t &value) {
 #endif
 }
 
+[[deprecated("Use UpdateInternal instead.")]]
 int CLevelHashDB::Update(uint64_t key, uint64_t value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -198,6 +196,7 @@ int CLevelHashDB::Update(uint64_t key, uint64_t value) {
 #endif
 }
 
+[[deprecated("Use InsertInternal instead.")]]
 int CLevelHashDB::Insert(uint64_t key, uint64_t value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -228,6 +227,7 @@ int CLevelHashDB::Insert(uint64_t key, uint64_t value) {
 #endif
 }
 
+[[deprecated("Use DeleteInternal instead.")]]
 int CLevelHashDB::Delete(uint64_t key) {
 #ifdef USE_MSG_QUEUE
   int finish = false;

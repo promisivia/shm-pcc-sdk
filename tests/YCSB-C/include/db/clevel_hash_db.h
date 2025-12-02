@@ -5,7 +5,7 @@
 #include "core/db.h"
 #include "utils/config.h"
 #include "shm/cxl_type.h"
-#include "clevel_hash.hpp"
+#include <libpmemobj++/experimental/clevel_hash.hpp>
 
 namespace ycsbc {
 
@@ -31,12 +31,16 @@ public:
 
   int DeleteInternal(uint64_t key) override;
 
+  [[deprecated("Use ReadInternal instead.")]]
   int Read(uint64_t key, uint64_t &value) override;
 
+  [[deprecated("Use UpdateInternal instead.")]]
   int Update(uint64_t key, uint64_t value) override;
 
+  [[deprecated("Use InsertInternal instead.")]]
   int Insert(uint64_t key, uint64_t value) override;
 
+  [[deprecated("Use DeleteInternal instead.")]]
   int Delete(uint64_t key) override;
 
   // void Init() override;
