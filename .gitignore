@@ -4,3 +4,4 @@ memory-bank
 build
 .cache
 compile_commands.json
+*.svg

@@ -175,9 +175,9 @@ class MPMCQueue {
     nt<size_t> turn{0};
   };
 
-  alignas(64) nt_pointer<T_wrapper[]> buffer;
   nt<size_t> head{0};
   nt<size_t> tail{0};
+  alignas(64) nt_pointer<T_wrapper[]> buffer;
 #ifdef QUEUE_LEN_PERF
   Logger<size_t> len_stat{std::string("queue_len")};
 #endif

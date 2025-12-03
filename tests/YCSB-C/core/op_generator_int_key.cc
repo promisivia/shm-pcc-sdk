@@ -1,4 +1,5 @@
 #include "core/op_generator_int_key.h"
+#include <iostream>
 
 namespace ycsbc {
 
@@ -21,7 +22,10 @@ int OpGeneratorIntKey::GenerateReadModifyWrite(
 int OpGeneratorIntKey::GenerateScan(
     cxl_vector<Operation>& ops) {
   uint64_t key = workload_->NextTransactionNumKey();
-  int len = workload_->NextScanLength();
+  int len;
+  do {
+    len = workload_->NextScanLength();
+  } while (len <= 0);
   ops.emplace_back(SCAN, key, len);
   return 0;
 }

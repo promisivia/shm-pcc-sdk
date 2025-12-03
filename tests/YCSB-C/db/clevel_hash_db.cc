@@ -47,7 +47,7 @@ CLevelHashDB::~CLevelHashDB() {
 #endif
 }
 
-int CLevelHashDB::ReadInternal(uint64_t key, uint64_t &value) {
+int CLevelHashDB::ReadInternal(uint64_t key, uintptr_t &value) {
 #ifdef LOCAL_NO_CC
   auto ret = level->search(key);
 #else
@@ -56,14 +56,15 @@ int CLevelHashDB::ReadInternal(uint64_t key, uint64_t &value) {
 #endif
   if (ret.found) {
     value = ret.value->second;
+    utils::AccessValueByAddress(value);
     return DB::kOK;
   } else {
     return DB::kErrorNoData;
   }
 }
 
-int CLevelHashDB::UpdateInternal(uint64_t key, uint64_t value) {
-  std::pair<uint64_t, uint64_t> pair(key, value);
+int CLevelHashDB::UpdateInternal(uint64_t key, uintptr_t value) {
+  std::pair<uint64_t, uintptr_t> pair(key, value);
 #ifdef LOCAL_NO_CC
   level->update(pair, SimThreadInfo::worker_thread_id);
 #else
@@ -74,8 +75,8 @@ int CLevelHashDB::UpdateInternal(uint64_t key, uint64_t value) {
   return DB::kOK;
 }
 
-int CLevelHashDB::InsertInternal(uint64_t key, uint64_t value) {
-  std::pair<uint64_t, uint64_t> pair(key, value);
+int CLevelHashDB::InsertInternal(uint64_t key, uintptr_t value) {
+  std::pair<uint64_t, uintptr_t> pair(key, value);
 #ifdef LOCAL_NO_CC
   level->insert(pair, SimThreadInfo::worker_thread_id, key);
 #else

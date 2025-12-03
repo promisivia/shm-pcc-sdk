@@ -112,7 +112,7 @@ int BwTreeDB::Read(const std::string& table, const std::string& key,
 #endif
 }
 
-int BwTreeDB::ReadInternal(uint64_t key, uint64_t &value) {
+int BwTreeDB::ReadInternal(uint64_t key, uintptr_t &value) {
 #ifdef TRX_TYPE_STAT
   read_cnt.fetch_add(1);
 #endif
@@ -122,6 +122,8 @@ int BwTreeDB::ReadInternal(uint64_t key, uint64_t &value) {
     return DB::kErrorNoData;
   }
   value = val[0];
+  // access the real value by address
+  utils::AccessValueByAddress(value);
   return DB::kOK;
 }
 
@@ -229,7 +231,7 @@ int BwTreeDB::Update(const std::string& table, const std::string& key,
   #endif
 }
 
-int BwTreeDB::UpdateInternal(uint64_t key, uint64_t value) {
+int BwTreeDB::UpdateInternal(uint64_t key, uintptr_t value) {
 #ifdef TRX_TYPE_STAT
   update_cnt.fetch_add(1);
 #endif
@@ -271,7 +273,7 @@ int BwTreeDB::Insert(const std::string& table, const std::string& key,
   #endif
 }
 
-int BwTreeDB::InsertInternal(uint64_t key, uint64_t value) {
+int BwTreeDB::InsertInternal(uint64_t key, uintptr_t value) {
 #ifdef TRX_TYPE_STAT
   insert_cnt.fetch_add(1);
 #endif

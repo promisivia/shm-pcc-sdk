@@ -1,7 +1,4 @@
 #include "core/properties.h"
-#include <cstdint>
-
-uint32_t VALUE_ADDR_SIZE = 0;
 
 namespace utils {
 std::string ParseCommandLine(int argc, const char *argv[],

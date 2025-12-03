@@ -105,6 +105,8 @@ inline int RandomValueNum() {
   return dis(gen);
 }
 
+void AccessValueByAddress(uintptr_t value);
+
 } // utils
 
 #endif // YCSB_C_UTILS_H_

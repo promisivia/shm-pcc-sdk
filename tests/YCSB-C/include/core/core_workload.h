@@ -27,6 +27,7 @@ class OperationInternal {
  public:
   OperationInternal(OpType type) : type(type) {}
   OperationInternal(OpType type, K key, V val) : type(type), key(key), value(val) {}
+  OperationInternal(OpType type, K key, int len) : type(type), key(key), len(len) {}
   OperationInternal(OpType type, std::string table, K key,
             std::vector<std::string> fields, V val)
       : type(type), table(table), key(key), fields(fields), value(val) {};

@@ -143,7 +143,7 @@ void master_process(utils::Properties &props) {
   std::cerr << "dispatcher\t" << SimThreadInfo::dispatcher_thread_count << '\n'
             << "worker\t" << SimThreadInfo::worker_thread_count << '\n'
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
-            << "throughput\t" << "\033[31m" << (sum / duration / 1000000) << " Mops/s" << "\033[0m\n"
+            << "throughput\t" << (sum / duration / 1000000) << " Mops/s\n"
             << "duration(s)\t" << duration << '\n'
             << "total operations\t" << sum << '\n';
 

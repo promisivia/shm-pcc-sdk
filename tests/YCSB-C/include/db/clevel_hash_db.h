@@ -23,11 +23,11 @@ public:
   //            std::vector<KVPair> &values);
   // int Delete(const std::string &table, const std::string &key);
 
-  int ReadInternal(uint64_t key, uint64_t &value) override;
+  int ReadInternal(uint64_t key, uintptr_t &value) override;
 
-  int UpdateInternal(uint64_t key, uint64_t value) override;
+  int UpdateInternal(uint64_t key, uintptr_t value) override;
 
-  int InsertInternal(uint64_t key, uint64_t value) override;
+  int InsertInternal(uint64_t key, uintptr_t value) override;
 
   int DeleteInternal(uint64_t key) override;
 
