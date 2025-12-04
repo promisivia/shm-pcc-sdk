@@ -36,11 +36,6 @@ namespace ART_OLC {
         return true;
     }
 
-    void N48::flush() {
-        clwb(childIndex, 256 * sizeof(uint8_t));
-        clwb(children, 48 * sizeof(N*));
-    }
-
     N *N48::getChild(const uint8_t k) const {
         if (childIndex[k] == emptyMarker) {
             return nullptr;

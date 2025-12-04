@@ -245,7 +245,7 @@ class permuter {
           </ul> */
         void remove(int i) {
             if (int(x_.load(std::memory_order_acquire) & 15) == i + 1)
-            #ifdef NO_CC
+#ifdef NO_CC
               x_.fetch_sub(1);
 #else
               x_.fetch_sub(1, std::memory_order_acq_rel);

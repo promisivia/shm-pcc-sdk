@@ -47,11 +47,6 @@ namespace ART_OLC {
         __builtin_unreachable();
     }
 
-    void N4::flush() {
-        clwb(keys, 4 * sizeof(uint8_t));
-        clwb(children, 4 * sizeof(N*));
-    }
-
     N *N4::getChild(const uint8_t k) const {
         for (uint32_t i = 0; i < count; ++i) {
             if (keys[i] == k) {

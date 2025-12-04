@@ -2,6 +2,8 @@
 #define __HOT__COMMONS__PARTIAL_KEY_MAPPING_BASE_HPP___
 
 #include "hot/commons/DiscriminativeBit.hpp"
+#include "utils/atomic_variable.h"
+#include "utils/config.h"
 
 namespace hot { namespace commons {
 
@@ -12,8 +14,13 @@ namespace hot { namespace commons {
  */
 class PartialKeyMappingBase {
 public:
+#ifdef NO_CC
+	nt<uint16_t> mMostSignificantDiscriminativeBitIndex;
+	nt<uint16_t> mLeastSignificantDiscriminativeBitIndex;
+#else
 	uint16_t mMostSignificantDiscriminativeBitIndex;
 	uint16_t mLeastSignificantDiscriminativeBitIndex;
+#endif
 
 protected:
 	//This does not initialize the fields and is only allowed to be called from subclasses
@@ -27,8 +34,8 @@ protected:
 
 	PartialKeyMappingBase(PartialKeyMappingBase const existing, DiscriminativeBit const & significantKeyInformation)
 		: PartialKeyMappingBase(
-			std::min(existing.mMostSignificantDiscriminativeBitIndex, significantKeyInformation.mAbsoluteBitIndex),
-		  	std::max(existing.mLeastSignificantDiscriminativeBitIndex, significantKeyInformation.mAbsoluteBitIndex)
+			std::min(static_cast<uint16_t>(existing.mMostSignificantDiscriminativeBitIndex), significantKeyInformation.mAbsoluteBitIndex),
+		  	std::max(static_cast<uint16_t>(existing.mLeastSignificantDiscriminativeBitIndex), significantKeyInformation.mAbsoluteBitIndex)
 		)
 	{
 	}

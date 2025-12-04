@@ -37,7 +37,7 @@
 #include "atomic_ops.h"
 #include "utils.h"
 #include <stdbool.h>
-#include "utils/rlock.h"
+#include "rlock.h"
 #define MODIFY /* modified with */
 
 #ifdef __cplusplus
@@ -168,15 +168,17 @@ typedef volatile uint8_t clht_lock_t;
 typedef struct ALIGNED(CACHE_LINE_SIZE) bucket_s
 {
   clht_lock_t lock;
-  uint32_t hops;
 #ifdef NO_CC
+  nt<uint32_t> hops;
   nt<clht_addr_t> key[ENTRIES_PER_BUCKET];
   nt<clht_val_t> val[ENTRIES_PER_BUCKET];
+  nt_pointer<struct bucket_s> next;
 #else
+  uint32_t hops;
   clht_addr_t key[ENTRIES_PER_BUCKET];
   clht_val_t val[ENTRIES_PER_BUCKET];
-#endif
   struct bucket_s* next;
+#endif
 } bucket_t;
 
 //#if __GNUC__ > 4 && __GNUC_MINOR__ > 4
@@ -189,7 +191,11 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht
   {
     struct clht_fields
     {
+#ifdef NO_CC
+      nt_pointer<struct clht_hashtable_s> ht;
+#else
       struct clht_hashtable_s* ht;
+#endif
       uint8_t next_cache_line[CACHE_LINE_SIZE - (sizeof(void*))];
       struct clht_hashtable_s* ht_oldest;
       struct ht_ts* version_list;

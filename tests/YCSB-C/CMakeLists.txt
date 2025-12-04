@@ -56,15 +56,15 @@ if(VARIANT STREQUAL "limit_atomic")
 endif()
 
 add_db("bwtree_db.cc" "BwTree" "bwtree" "ENABLE_BWTREE_DB" "PUBLIC")
-add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
-# add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
-# add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
+add_db("clevel_hash_db.cc" "ClevelHash" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
+add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
+add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
 # add_db("level_hash_db.cc" "Level-Hashing" "levelhash" "ENABLE_LEVEL_HASH_DB" "PUBLIC")
-# add_db("masstree_db.cc" "Masstree" "masstree" "ENABLE_MASSTREE_DB" "PUBLIC")
-# add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" "ENABLE_RADIX_ART_OLC_DB" "PUBLIC")
+add_db("masstree_db.cc" "Masstree" "masstree" "ENABLE_MASSTREE_DB" "PUBLIC")
+add_db("radix_art_olc_db.cc" "RadixART" "ARTSynchronized" "ENABLE_RADIX_ART_OLC_DB" "PUBLIC")
 # add_db("sherman_db.cc" "Sherman" "sherman" "ENABLE_SHERMAN_DB" "PUBLIC")
 # add_db("btree_db.cc" "btree" "USE_BTREE")
-# add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" "ENABLE_BTREE_OLC_DB" "HEADER")
+add_db("btree_olc_db.cc" "BTreeOLC" "btreeolc" "ENABLE_BTREE_OLC_DB" "HEADER")
 
 # Link libraries
 
@@ -124,5 +124,10 @@ add_ycsbc_executable(ycsbc_nocc_clevel_part1 "NO_CC")
 add_ycsbc_executable(ycsbc_nocc_clevel_part2 "NO_CC;OPT_BATCH_FLUSH")
 add_ycsbc_executable(ycsbc_nocc_bwtree_part1 "NO_CC;OPT_GC")
 add_ycsbc_executable(ycsbc_nocc_bwtree_part2 "NO_CC;OPT_GC;OPT_ROOT_READ")
-
+# Latency test
+add_ycsbc_executable(ycsbc_lat_cc "TRX_LATENCY")
+add_ycsbc_executable(ycsbc_lat_nocc "TRX_LATENCY;NO_CC;${OPT_FLAGS};QUEUE_SIM_CAS")
+add_ycsbc_executable(ycsbc_lat_nocc_no_clflush "TRX_LATENCY;NO_CC;${OPT_FLAGS};QUEUE_SIM_CAS;NO_CLFLUSH")
+add_ycsbc_executable(ycsbc_lat_nocc_no_opt "TRX_LATENCY;NO_CC")
+add_ycsbc_executable(ycsbc_lat_nocc_no_opt_no_clflush "TRX_LATENCY;NO_CC;NO_CLFLUSH")
 # add_executable(test test.cc)

@@ -226,19 +226,22 @@ task_imbalance_multi_db() {
 task_latency_overhead() {
     dir=./log/latency_overhead
     mkdir -p $dir
-    configs=("cc" "nocc_no_opt" "nocc")
-    db_types=(
-        "clht"
-        "clevelhash"
-        "bwtree"
-        "btree_olc"
-        "hot"
-        "masstree"
-        "radix_art_olc"
-    )
-    for config in "${configs[@]}"; do
-        for db_type in "${db_types[@]}"; do
-            ./build.sh "${config}"
+    # configs=("lat_cc" "lat_nocc_no_opt" "lat_nocc_no_opt_no_clflush")
+    # configs=("lat_nocc_no_opt_no_clflush")
+    # db_types=("clevelhash" "bwtree")
+    # for config in "${configs[@]}"; do
+    #     ./build.sh "${config}"
+    #     for db_type in "${db_types[@]}"; do
+    #         ./run_shm_ds.sh -mode=latency_overhead -db=${db_type} 2>&1 | tee $dir/${config}_${db_type}.log
+    #     done
+    # done
+    # db_types2=("clht" "btree_olc" "hot" "masstree" "radix_art_olc")
+    db_types2=("clht")
+    # configs2=("lat_cc" "lat_nocc" "lat_nocc_no_clflush")
+    configs2=("lat_nocc_no_opt_no_clflush" "lat_nocc")
+    for config in "${configs2[@]}"; do
+        ./build.sh "${config}"
+        for db_type in "${db_types2[@]}"; do
             ./run_shm_ds.sh -mode=latency_overhead -db=${db_type} 2>&1 | tee $dir/${config}_${db_type}.log
         done
     done
@@ -261,6 +264,6 @@ echo $PASSWORD | sudo -S ./prepare_env.sh
 # task_clevel_breakdown
 # task_bwtree_breakdown
 # task_sherman_indivi
-# task_latency_overhead
+task_latency_overhead
 
 echo $PASSWORD | sudo -S ./reset_env.sh

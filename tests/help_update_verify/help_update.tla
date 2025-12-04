@@ -6,8 +6,8 @@ ASSUME NumThreads \in Nat /\ NumThreads > 0
 
 CONSTANT MaxNumOp
 
-Operations == [type: {"write"}, data: Nat, thread: 0..NumThreads-1]
-       \union [type: {"read"}, data: Nat, thread: 0..NumThreads-1]
+Operations == [type: {"write"}, data: Nat, thread: 0..NumThreads-1, start_time: Nat, end_time: Nat]
+       \union [type: {"read"}, data: Nat, thread: 0..NumThreads-1, start_time: Nat, end_time: Nat]
 
 Threads == 0..NumThreads-1
 
@@ -18,9 +18,7 @@ variables
 (* Global pointer value (simulates clear_lock_bit(global_ptr))*)
 G_val = 0;              
 (* Global pointer lock bit (simulates has_lock_bit(global_ptr))*)
-G_locked = FALSE;       
-(* Value to be written *)
-value = 1;
+G_locked = FALSE;
 (* Replica pointer values *)
 R_val = [i \in Threads |-> 0]; 
 (* Replica pointer lock bits *)
@@ -33,68 +31,60 @@ write_result = [i \in Threads |-> FALSE];
 help_update_result = [i \in Threads |-> 0];
 (* History *)
 History = <<>>;
+(* Global Logical Time *)
+LogicTime = 0;
 
 (* HelpUpdate procedure *)
 procedure HelpUpdate(expected_val, start_check_id) 
-variable ii = 0, cur_G_val = 0, local_R_val = 0; \* 局部变量：ii, cur_G_val, local_R_val
+variable ii = 0; \* 局部变量：ii, cur_G_val, local_R_val
 {
-restart_global:
-    (* 检查全局指针是否已完成更新 (cur_global_ptr = expected_val.0) *)
-    cur_G_val := G_val;
-    if (cur_G_val = expected_val /\ G_locked = FALSE) {
-        help_update_result[self] := expected_val; \* 成功返回
-HP0:
-        return;
-    };
+HP0:  
     (* 依次帮助更新每个 Replica *)
-HP1:
     ii := start_check_id;
-HP2:
+HP1:
     while (ii < NumThreads) {
         (* 检查全局状态，如果已完成或改变，则退出/重启 *)
+HP2:
         if (G_val = expected_val /\ G_locked = FALSE) {
-            help_update_result[self] := expected_val; \* 成功返回
+            help_update_result[self] := TRUE; \* 成功返回
             return;
         };
         
         (* 然后尝试依次更新每个 replica *)
 HP3:
-        local_R_val := R_val[ii];
-        
         (* 可以假设有人在一直更新，可以先check是不是已经更新成功了 *)
         (* 注意：在 PlusCal 中，replica 的 lock bit 始终为 FALSE，因为它不承担 Writer 的 commit 锁。 *)
-        if (local_R_val /= expected_val) {
+        if (R_val[ii] /= expected_val) {
             (* 需要帮助更新，但必须先判断是不是因为 global 变了 *)
-            cur_G_val := G_val;
-            if (cur_G_val /= expected_val) {
-                (* 立刻返回失败，需要从新的 value 开始 (goto restart_global) *)
-                expected_val := cur_G_val;
-                start_check_id := 0;
-                goto restart_global;
+HP4:
+            if (G_val /= expected_val) {
+                (* 说明有其他人成功更新G_val，clear lock，然后又成功更新了新的G_val，立刻返回失败 *)
+                help_update_result[self] := FALSE;
+                return;
             } else {
                 (* 不是因为 global 变了，说明这个 replica 更旧，需要帮助更新 *)
                 R_val[ii] := expected_val;
                 R_locked[ii] := TRUE; \* 模拟 set_lock_bit(expected_val)
             }
         };
-HP4:
+HP6:
         ii := ii + 1;
     };
     
+HP7:
     (* 这一轮检查，所有的 replica 和 global 的值都更新为 expected_val (带锁位) 了 *)
-    if (G_val = expected_val) {
+    if (G_val = expected_val /\ G_locked = TRUE) {
         (* 尝试 CAS G 从 locked 到 unlocked (current_cas(global_ptr, cur_global_ptr, expected_val)) *)
-        if (G_locked = TRUE) {
-            G_locked := FALSE; \* CAS 成功 (清除锁位)
-        };
-        help_update_result[self] := G_val; \* 成功返回
-HP5:
+        (* Here is the LP of reader/writer !!! *)
+        \* call markLP();
+        G_locked := FALSE; \* CAS 成功 (清除锁位)
+        help_update_result[self] := TRUE; \* 成功返回
+HP10:
         return;
     } else {
         (* G_val 改变了 *)
-        expected_val := G_val;
-        start_check_id := 0;
-        goto restart_global;
+        help_update_result[self] := FALSE;
+        return;
     }
 };
 
@@ -113,51 +103,38 @@ W1:
         write_result[self] := FALSE; (* CAS 失败，返回 false *)
 W2:
         return;
-    }; 
-
-W3: 
-    (* 2: CAS 成功 (Commit Point: 锁定) *)
-    G_locked := TRUE; 
-    G_val := new_val;
-
-    (* 3: 依次写每个R[i]为new_val.1 *)
-    iii := 0;
-W4:
-    while (iii < NumThreads) {
-W5:
-        R_locked[iii] := TRUE;
-        R_val[iii] := new_val;
-        iii := iii + 1;
+    } else {
+        (* 2: CAS 成功 (Commit Point: 锁定) *)
+        G_locked := TRUE; 
+        G_val := new_val;
     };
-W6:
+
+W3:
+    call HelpUpdate(new_val, 0);
+W4:
     write_result[self] := TRUE;
-    History := Append(History, [type |-> "write",
-                            data |-> new_val,
-                            thread |-> self]);
-W7:
-    G_locked := FALSE;
-W8:
     return;
 }
 
 procedure reader()
+variable local_R_val = 0;
 {
 R0: (* 1: 如果R[i]没有锁位，直接读取R[i]的值 *)
+    local_R_val := R_val[self];
+    (* Case (1): 如果R[i]以.0结尾，说明当前的R[i]不是更新的G，可以直接从R[i]开始 *)
     if (R_locked[self] = FALSE) {
-        read_result[self] := R_val[self];
-        History := Append(History, [type |-> "read",
-                                data |-> read_result[self],
-                                thread |-> self]);
+        read_result[self] := local_R_val;
     } else {
 R1: (* 2: 如果R[i]有锁位，先帮助更新R[i]的值 *)
-        call HelpUpdate(R_val[self], self + 1); (* HelpUpdate 返回最终 clean value G_val *)
-R2:
-        read_result[self] := help_update_result[self];
-        History := Append(History, [type |-> "read",
-                                data |-> read_result[self],
-                                thread |-> self]);
-    };
+        (* 这里的commit point应该在writer的commit point之后，下一次修改之前 *)
+        call HelpUpdate(local_R_val, self + 1); (* HelpUpdate 返回最终 clean value G_val *)
 R3:
+        if (help_update_result[self] = TRUE) {
+            R_locked[self] := FALSE;
+        };
+        read_result[self] := local_R_val;
+    };
+R4:
     return;
 }
 
@@ -165,17 +142,33 @@ R3:
 (* --------------------- THREAD ACTIONS ------------------------- *)
 (* -------------------------------------------------------------- *)
 fair process (thread_id \in Threads)
-variables num_op = 0;
+variables _num_op = 0, _start_time = 0, _end_time = 0, value = 0;
 {
     thread_loop:
-    while (num_op < MaxNumOp) {
-        num_op := num_op + 1;
+    while (_num_op < MaxNumOp) {
+        _num_op := _num_op + 1;
         either {
         read:
+            LogicTime := LogicTime + 1;
+            _start_time := LogicTime;
             call reader();
+P0:
+            LogicTime := LogicTime + 1;
+            _end_time := LogicTime;
+            History := Append(History, [type |-> "read", data |-> read_result[self], thread |-> self, start_time |-> _start_time, end_time |-> _end_time]);
         } or {
         write:
-            call writer(G_val, G_val + 1);
+            LogicTime := LogicTime + 1;
+            _start_time := LogicTime;
+            value := G_val;
+
+            call writer(value, value + 1);
+P1:
+            LogicTime := LogicTime + 1;
+            _end_time := LogicTime;
+            if (write_result[self] = TRUE) {
+                History := Append(History, [type |-> "write", data |-> value + 1, thread |-> self, start_time |-> _start_time, end_time |-> _end_time]);
+            };
         }
     }
 }
@@ -183,158 +176,151 @@ variables num_op = 0;
 
 \* BEGIN TRANSLATION
 CONSTANT defaultInitValue
-VARIABLES G_val, G_locked, value, R_val, R_locked, read_result, write_result, 
-          help_update_result, History, pc, stack, expected_val, 
-          start_check_id, ii, cur_G_val, local_R_val, old_val, new_val, iii, 
-          num_op
+VARIABLES G_val, G_locked, R_val, R_locked, read_result, write_result, 
+          help_update_result, History, LogicTime, pc, stack, expected_val, 
+          start_check_id, ii, old_val, new_val, iii, local_R_val, _num_op, 
+          _start_time, _end_time, value
 
-vars == << G_val, G_locked, value, R_val, R_locked, read_result, write_result, 
-           help_update_result, History, pc, stack, expected_val, 
-           start_check_id, ii, cur_G_val, local_R_val, old_val, new_val, iii, 
-           num_op >>
+vars == << G_val, G_locked, R_val, R_locked, read_result, write_result, 
+           help_update_result, History, LogicTime, pc, stack, expected_val, 
+           start_check_id, ii, old_val, new_val, iii, local_R_val, _num_op, 
+           _start_time, _end_time, value >>
 
 ProcSet == (Threads)
 
 Init == (* Global variables *)
         /\ G_val = 0
         /\ G_locked = FALSE
-        /\ value = 1
         /\ R_val = [i \in Threads |-> 0]
         /\ R_locked = [i \in Threads |-> FALSE]
         /\ read_result = [i \in Threads |-> 0]
         /\ write_result = [i \in Threads |-> FALSE]
         /\ help_update_result = [i \in Threads |-> 0]
         /\ History = <<>>
+        /\ LogicTime = 0
         (* Procedure HelpUpdate *)
         /\ expected_val = [ self \in ProcSet |-> defaultInitValue]
         /\ start_check_id = [ self \in ProcSet |-> defaultInitValue]
         /\ ii = [ self \in ProcSet |-> 0]
-        /\ cur_G_val = [ self \in ProcSet |-> 0]
-        /\ local_R_val = [ self \in ProcSet |-> 0]
         (* Procedure writer *)
         /\ old_val = [ self \in ProcSet |-> defaultInitValue]
         /\ new_val = [ self \in ProcSet |-> defaultInitValue]
         /\ iii = [ self \in ProcSet |-> 0]
+        (* Procedure reader *)
+        /\ local_R_val = [ self \in ProcSet |-> 0]
         (* Process thread_id *)
-        /\ num_op = [self \in Threads |-> 0]
+        /\ _num_op = [self \in Threads |-> 0]
+        /\ _start_time = [self \in Threads |-> 0]
+        /\ _end_time = [self \in Threads |-> 0]
+        /\ value = [self \in Threads |-> 0]
         /\ stack = [self \in ProcSet |-> << >>]
         /\ pc = [self \in ProcSet |-> "thread_loop"]
 
-restart_global(self) == /\ pc[self] = "restart_global"
-                        /\ cur_G_val' = [cur_G_val EXCEPT ![self] = G_val]
-                        /\ IF cur_G_val'[self] = expected_val[self] /\ G_locked = FALSE
-                              THEN /\ help_update_result' = [help_update_result EXCEPT ![self] = expected_val[self]]
-                                   /\ pc' = [pc EXCEPT ![self] = "HP0"]
-                              ELSE /\ pc' = [pc EXCEPT ![self] = "HP1"]
-                                   /\ UNCHANGED help_update_result
-                        /\ UNCHANGED << G_val, G_locked, value, R_val, 
-                                        R_locked, read_result, write_result, 
-                                        History, stack, expected_val, 
-                                        start_check_id, ii, local_R_val, 
-                                        old_val, new_val, iii, num_op >>
-
 HP0(self) == /\ pc[self] = "HP0"
-             /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-             /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
-             /\ cur_G_val' = [cur_G_val EXCEPT ![self] = Head(stack[self]).cur_G_val]
-             /\ local_R_val' = [local_R_val EXCEPT ![self] = Head(stack[self]).local_R_val]
-             /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
-             /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
-             /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-             /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                             read_result, write_result, help_update_result, 
-                             History, old_val, new_val, iii, num_op >>
+             /\ ii' = [ii EXCEPT ![self] = start_check_id[self]]
+             /\ pc' = [pc EXCEPT ![self] = "HP1"]
+             /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                             write_result, help_update_result, History, 
+                             LogicTime, stack, expected_val, start_check_id, 
+                             old_val, new_val, iii, local_R_val, _num_op, 
+                             _start_time, _end_time, value >>
 
 HP1(self) == /\ pc[self] = "HP1"
-             /\ ii' = [ii EXCEPT ![self] = start_check_id[self]]
-             /\ pc' = [pc EXCEPT ![self] = "HP2"]
-             /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                             read_result, write_result, help_update_result, 
-                             History, stack, expected_val, start_check_id, 
-                             cur_G_val, local_R_val, old_val, new_val, iii, 
-                             num_op >>
+             /\ IF ii[self] < NumThreads
+                   THEN /\ pc' = [pc EXCEPT ![self] = "HP2"]
+                   ELSE /\ pc' = [pc EXCEPT ![self] = "HP7"]
+             /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                             write_result, help_update_result, History, 
+                             LogicTime, stack, expected_val, start_check_id, 
+                             ii, old_val, new_val, iii, local_R_val, _num_op, 
+                             _start_time, _end_time, value >>
 
 HP2(self) == /\ pc[self] = "HP2"
-             /\ IF ii[self] < NumThreads
-                   THEN /\ IF G_val = expected_val[self] /\ G_locked = FALSE
-                              THEN /\ help_update_result' = [help_update_result EXCEPT ![self] = expected_val[self]]
-                                   /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-                                   /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
-                                   /\ cur_G_val' = [cur_G_val EXCEPT ![self] = Head(stack[self]).cur_G_val]
-                                   /\ local_R_val' = [local_R_val EXCEPT ![self] = Head(stack[self]).local_R_val]
-                                   /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
-                                   /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
-                                   /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-                              ELSE /\ pc' = [pc EXCEPT ![self] = "HP3"]
-                                   /\ UNCHANGED << help_update_result, stack, 
-                                                   expected_val, 
-                                                   start_check_id, ii, 
-                                                   cur_G_val, local_R_val >>
-                        /\ UNCHANGED G_locked
-                   ELSE /\ cur_G_val' = [cur_G_val EXCEPT ![self] = G_val]
-                        /\ IF G_val = expected_val[self]
-                              THEN /\ IF G_locked = TRUE
-                                         THEN /\ G_locked' = FALSE
-                                         ELSE /\ TRUE
-                                              /\ UNCHANGED G_locked
-                                   /\ help_update_result' = [help_update_result EXCEPT ![self] = G_val]
-                                   /\ pc' = [pc EXCEPT ![self] = "HP5"]
-                                   /\ UNCHANGED << expected_val, 
-                                                   start_check_id >>
-                              ELSE /\ expected_val' = [expected_val EXCEPT ![self] = G_val]
-                                   /\ start_check_id' = [start_check_id EXCEPT ![self] = 0]
-                                   /\ pc' = [pc EXCEPT ![self] = "restart_global"]
-                                   /\ UNCHANGED << G_locked, 
-                                                   help_update_result >>
-                        /\ UNCHANGED << stack, ii, local_R_val >>
-             /\ UNCHANGED << G_val, value, R_val, R_locked, read_result, 
-                             write_result, History, old_val, new_val, iii, 
-                             num_op >>
+             /\ IF G_val = expected_val[self] /\ G_locked = FALSE
+                   THEN /\ help_update_result' = [help_update_result EXCEPT ![self] = TRUE]
+                        /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+                        /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
+                        /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
+                        /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
+                        /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
+                   ELSE /\ pc' = [pc EXCEPT ![self] = "HP3"]
+                        /\ UNCHANGED << help_update_result, stack, 
+                                        expected_val, start_check_id, ii >>
+             /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                             write_result, History, LogicTime, old_val, 
+                             new_val, iii, local_R_val, _num_op, _start_time, 
+                             _end_time, value >>
 
 HP3(self) == /\ pc[self] = "HP3"
-             /\ local_R_val' = [local_R_val EXCEPT ![self] = R_val[ii[self]]]
-             /\ IF local_R_val'[self] /= expected_val[self]
-                   THEN /\ cur_G_val' = [cur_G_val EXCEPT ![self] = G_val]
-                        /\ IF cur_G_val'[self] /= expected_val[self]
-                              THEN /\ expected_val' = [expected_val EXCEPT ![self] = cur_G_val'[self]]
-                                   /\ start_check_id' = [start_check_id EXCEPT ![self] = 0]
-                                   /\ pc' = [pc EXCEPT ![self] = "restart_global"]
-                                   /\ UNCHANGED << R_val, R_locked >>
-                              ELSE /\ R_val' = [R_val EXCEPT ![ii[self]] = expected_val[self]]
-                                   /\ R_locked' = [R_locked EXCEPT ![ii[self]] = TRUE]
-                                   /\ pc' = [pc EXCEPT ![self] = "HP4"]
-                                   /\ UNCHANGED << expected_val, 
-                                                   start_check_id >>
-                   ELSE /\ pc' = [pc EXCEPT ![self] = "HP4"]
-                        /\ UNCHANGED << R_val, R_locked, expected_val, 
-                                        start_check_id, cur_G_val >>
-             /\ UNCHANGED << G_val, G_locked, value, read_result, write_result, 
-                             help_update_result, History, stack, ii, old_val, 
-                             new_val, iii, num_op >>
+             /\ IF R_val[ii[self]] /= expected_val[self]
+                   THEN /\ pc' = [pc EXCEPT ![self] = "HP4"]
+                   ELSE /\ pc' = [pc EXCEPT ![self] = "HP6"]
+             /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                             write_result, help_update_result, History, 
+                             LogicTime, stack, expected_val, start_check_id, 
+                             ii, old_val, new_val, iii, local_R_val, _num_op, 
+                             _start_time, _end_time, value >>
 
 HP4(self) == /\ pc[self] = "HP4"
+             /\ IF G_val /= expected_val[self]
+                   THEN /\ help_update_result' = [help_update_result EXCEPT ![self] = FALSE]
+                        /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+                        /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
+                        /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
+                        /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
+                        /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
+                        /\ UNCHANGED << R_val, R_locked >>
+                   ELSE /\ R_val' = [R_val EXCEPT ![ii[self]] = expected_val[self]]
+                        /\ R_locked' = [R_locked EXCEPT ![ii[self]] = TRUE]
+                        /\ pc' = [pc EXCEPT ![self] = "HP6"]
+                        /\ UNCHANGED << help_update_result, stack, 
+                                        expected_val, start_check_id, ii >>
+             /\ UNCHANGED << G_val, G_locked, read_result, write_result, 
+                             History, LogicTime, old_val, new_val, iii, 
+                             local_R_val, _num_op, _start_time, _end_time, 
+                             value >>
+
+HP6(self) == /\ pc[self] = "HP6"
              /\ ii' = [ii EXCEPT ![self] = ii[self] + 1]
-             /\ pc' = [pc EXCEPT ![self] = "HP2"]
-             /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                             read_result, write_result, help_update_result, 
-                             History, stack, expected_val, start_check_id, 
-                             cur_G_val, local_R_val, old_val, new_val, iii, 
-                             num_op >>
+             /\ pc' = [pc EXCEPT ![self] = "HP1"]
+             /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                             write_result, help_update_result, History, 
+                             LogicTime, stack, expected_val, start_check_id, 
+                             old_val, new_val, iii, local_R_val, _num_op, 
+                             _start_time, _end_time, value >>
 
-HP5(self) == /\ pc[self] = "HP5"
-             /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-             /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
-             /\ cur_G_val' = [cur_G_val EXCEPT ![self] = Head(stack[self]).cur_G_val]
-             /\ local_R_val' = [local_R_val EXCEPT ![self] = Head(stack[self]).local_R_val]
-             /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
-             /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
-             /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-             /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                             read_result, write_result, help_update_result, 
-                             History, old_val, new_val, iii, num_op >>
+HP7(self) == /\ pc[self] = "HP7"
+             /\ IF G_val = expected_val[self] /\ G_locked = TRUE
+                   THEN /\ G_locked' = FALSE
+                        /\ help_update_result' = [help_update_result EXCEPT ![self] = TRUE]
+                        /\ pc' = [pc EXCEPT ![self] = "HP10"]
+                        /\ UNCHANGED << stack, expected_val, start_check_id, 
+                                        ii >>
+                   ELSE /\ help_update_result' = [help_update_result EXCEPT ![self] = FALSE]
+                        /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+                        /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
+                        /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
+                        /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
+                        /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
+                        /\ UNCHANGED G_locked
+             /\ UNCHANGED << G_val, R_val, R_locked, read_result, write_result, 
+                             History, LogicTime, old_val, new_val, iii, 
+                             local_R_val, _num_op, _start_time, _end_time, 
+                             value >>
 
-HelpUpdate(self) == restart_global(self) \/ HP0(self) \/ HP1(self)
-                       \/ HP2(self) \/ HP3(self) \/ HP4(self) \/ HP5(self)
+HP10(self) == /\ pc[self] = "HP10"
+              /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+              /\ ii' = [ii EXCEPT ![self] = Head(stack[self]).ii]
+              /\ expected_val' = [expected_val EXCEPT ![self] = Head(stack[self]).expected_val]
+              /\ start_check_id' = [start_check_id EXCEPT ![self] = Head(stack[self]).start_check_id]
+              /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
+              /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                              write_result, help_update_result, History, 
+                              LogicTime, old_val, new_val, iii, local_R_val, 
+                              _num_op, _start_time, _end_time, value >>
+
+HelpUpdate(self) == HP0(self) \/ HP1(self) \/ HP2(self) \/ HP3(self)
+                       \/ HP4(self) \/ HP6(self) \/ HP7(self) \/ HP10(self)
 
 W0(self) == /\ pc[self] = "W0"
             /\ IF G_locked = TRUE
@@ -342,33 +328,33 @@ W0(self) == /\ pc[self] = "W0"
                           /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "HelpUpdate",
                                                                    pc        |->  "W1",
                                                                    ii        |->  ii[self],
-                                                                   cur_G_val |->  cur_G_val[self],
-                                                                   local_R_val |->  local_R_val[self],
                                                                    expected_val |->  expected_val[self],
                                                                    start_check_id |->  start_check_id[self] ] >>
                                                                \o stack[self]]
                           /\ start_check_id' = [start_check_id EXCEPT ![self] = 0]
                        /\ ii' = [ii EXCEPT ![self] = 0]
-                       /\ cur_G_val' = [cur_G_val EXCEPT ![self] = 0]
-                       /\ local_R_val' = [local_R_val EXCEPT ![self] = 0]
-                       /\ pc' = [pc EXCEPT ![self] = "restart_global"]
+                       /\ pc' = [pc EXCEPT ![self] = "HP0"]
                   ELSE /\ pc' = [pc EXCEPT ![self] = "W1"]
-                       /\ UNCHANGED << stack, expected_val, start_check_id, ii, 
-                                       cur_G_val, local_R_val >>
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, old_val, new_val, iii, num_op >>
+                       /\ UNCHANGED << stack, expected_val, start_check_id, ii >>
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, History, 
+                            LogicTime, old_val, new_val, iii, local_R_val, 
+                            _num_op, _start_time, _end_time, value >>
 
 W1(self) == /\ pc[self] = "W1"
             /\ IF G_val /= old_val[self]
                   THEN /\ write_result' = [write_result EXCEPT ![self] = FALSE]
                        /\ pc' = [pc EXCEPT ![self] = "W2"]
-                  ELSE /\ pc' = [pc EXCEPT ![self] = "W3"]
+                       /\ UNCHANGED << G_val, G_locked >>
+                  ELSE /\ G_locked' = TRUE
+                       /\ G_val' = new_val[self]
+                       /\ pc' = [pc EXCEPT ![self] = "W3"]
                        /\ UNCHANGED write_result
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, help_update_result, History, stack, 
-                            expected_val, start_check_id, ii, cur_G_val, 
-                            local_R_val, old_val, new_val, iii, num_op >>
+            /\ UNCHANGED << R_val, R_locked, read_result, help_update_result, 
+                            History, LogicTime, stack, expected_val, 
+                            start_check_id, ii, old_val, new_val, iii, 
+                            local_R_val, _num_op, _start_time, _end_time, 
+                            value >>
 
 W2(self) == /\ pc[self] = "W2"
             /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
@@ -376,171 +362,167 @@ W2(self) == /\ pc[self] = "W2"
             /\ old_val' = [old_val EXCEPT ![self] = Head(stack[self]).old_val]
             /\ new_val' = [new_val EXCEPT ![self] = Head(stack[self]).new_val]
             /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, expected_val, start_check_id, ii, 
-                            cur_G_val, local_R_val, num_op >>
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, History, 
+                            LogicTime, expected_val, start_check_id, ii, 
+                            local_R_val, _num_op, _start_time, _end_time, 
+                            value >>
 
 W3(self) == /\ pc[self] = "W3"
-            /\ G_locked' = TRUE
-            /\ G_val' = new_val[self]
-            /\ iii' = [iii EXCEPT ![self] = 0]
-            /\ pc' = [pc EXCEPT ![self] = "W4"]
-            /\ UNCHANGED << value, R_val, R_locked, read_result, write_result, 
-                            help_update_result, History, stack, expected_val, 
-                            start_check_id, ii, cur_G_val, local_R_val, 
-                            old_val, new_val, num_op >>
+            /\ /\ expected_val' = [expected_val EXCEPT ![self] = new_val[self]]
+               /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "HelpUpdate",
+                                                        pc        |->  "W4",
+                                                        ii        |->  ii[self],
+                                                        expected_val |->  expected_val[self],
+                                                        start_check_id |->  start_check_id[self] ] >>
+                                                    \o stack[self]]
+               /\ start_check_id' = [start_check_id EXCEPT ![self] = 0]
+            /\ ii' = [ii EXCEPT ![self] = 0]
+            /\ pc' = [pc EXCEPT ![self] = "HP0"]
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, History, 
+                            LogicTime, old_val, new_val, iii, local_R_val, 
+                            _num_op, _start_time, _end_time, value >>
 
 W4(self) == /\ pc[self] = "W4"
-            /\ IF iii[self] < NumThreads
-                  THEN /\ pc' = [pc EXCEPT ![self] = "W5"]
-                  ELSE /\ pc' = [pc EXCEPT ![self] = "W6"]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, stack, expected_val, start_check_id, ii, 
-                            cur_G_val, local_R_val, old_val, new_val, iii, 
-                            num_op >>
-
-W5(self) == /\ pc[self] = "W5"
-            /\ R_locked' = [R_locked EXCEPT ![iii[self]] = TRUE]
-            /\ R_val' = [R_val EXCEPT ![iii[self]] = new_val[self]]
-            /\ iii' = [iii EXCEPT ![self] = iii[self] + 1]
-            /\ pc' = [pc EXCEPT ![self] = "W4"]
-            /\ UNCHANGED << G_val, G_locked, value, read_result, write_result, 
-                            help_update_result, History, stack, expected_val, 
-                            start_check_id, ii, cur_G_val, local_R_val, 
-                            old_val, new_val, num_op >>
-
-W6(self) == /\ pc[self] = "W6"
             /\ write_result' = [write_result EXCEPT ![self] = TRUE]
-            /\ History' = Append(History, [type |-> "write",
-                                       data |-> new_val[self],
-                                       thread |-> self])
-            /\ pc' = [pc EXCEPT ![self] = "W7"]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, help_update_result, stack, 
-                            expected_val, start_check_id, ii, cur_G_val, 
-                            local_R_val, old_val, new_val, iii, num_op >>
-
-W7(self) == /\ pc[self] = "W7"
-            /\ G_locked' = FALSE
-            /\ pc' = [pc EXCEPT ![self] = "W8"]
-            /\ UNCHANGED << G_val, value, R_val, R_locked, read_result, 
-                            write_result, help_update_result, History, stack, 
-                            expected_val, start_check_id, ii, cur_G_val, 
-                            local_R_val, old_val, new_val, iii, num_op >>
-
-W8(self) == /\ pc[self] = "W8"
             /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
             /\ iii' = [iii EXCEPT ![self] = Head(stack[self]).iii]
             /\ old_val' = [old_val EXCEPT ![self] = Head(stack[self]).old_val]
             /\ new_val' = [new_val EXCEPT ![self] = Head(stack[self]).new_val]
             /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, expected_val, start_check_id, ii, 
-                            cur_G_val, local_R_val, num_op >>
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            help_update_result, History, LogicTime, 
+                            expected_val, start_check_id, ii, local_R_val, 
+                            _num_op, _start_time, _end_time, value >>
 
 writer(self) == W0(self) \/ W1(self) \/ W2(self) \/ W3(self) \/ W4(self)
-                   \/ W5(self) \/ W6(self) \/ W7(self) \/ W8(self)
 
 R0(self) == /\ pc[self] = "R0"
+            /\ local_R_val' = [local_R_val EXCEPT ![self] = R_val[self]]
             /\ IF R_locked[self] = FALSE
-                  THEN /\ read_result' = [read_result EXCEPT ![self] = R_val[self]]
-                       /\ History' = Append(History, [type |-> "read",
-                                                  data |-> read_result'[self],
-                                                  thread |-> self])
-                       /\ pc' = [pc EXCEPT ![self] = "R3"]
+                  THEN /\ read_result' = [read_result EXCEPT ![self] = local_R_val'[self]]
+                       /\ pc' = [pc EXCEPT ![self] = "R4"]
                   ELSE /\ pc' = [pc EXCEPT ![self] = "R1"]
-                       /\ UNCHANGED << read_result, History >>
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            write_result, help_update_result, stack, 
-                            expected_val, start_check_id, ii, cur_G_val, 
-                            local_R_val, old_val, new_val, iii, num_op >>
+                       /\ UNCHANGED read_result
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, write_result, 
+                            help_update_result, History, LogicTime, stack, 
+                            expected_val, start_check_id, ii, old_val, new_val, 
+                            iii, _num_op, _start_time, _end_time, value >>
 
 R1(self) == /\ pc[self] = "R1"
-            /\ /\ expected_val' = [expected_val EXCEPT ![self] = R_val[self]]
+            /\ /\ expected_val' = [expected_val EXCEPT ![self] = local_R_val[self]]
                /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "HelpUpdate",
-                                                        pc        |->  "R2",
+                                                        pc        |->  "R3",
                                                         ii        |->  ii[self],
-                                                        cur_G_val |->  cur_G_val[self],
-                                                        local_R_val |->  local_R_val[self],
                                                         expected_val |->  expected_val[self],
                                                         start_check_id |->  start_check_id[self] ] >>
                                                     \o stack[self]]
                /\ start_check_id' = [start_check_id EXCEPT ![self] = self + 1]
             /\ ii' = [ii EXCEPT ![self] = 0]
-            /\ cur_G_val' = [cur_G_val EXCEPT ![self] = 0]
-            /\ local_R_val' = [local_R_val EXCEPT ![self] = 0]
-            /\ pc' = [pc EXCEPT ![self] = "restart_global"]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, old_val, new_val, iii, num_op >>
-
-R2(self) == /\ pc[self] = "R2"
-            /\ read_result' = [read_result EXCEPT ![self] = help_update_result[self]]
-            /\ History' = Append(History, [type |-> "read",
-                                       data |-> read_result'[self],
-                                       thread |-> self])
-            /\ pc' = [pc EXCEPT ![self] = "R3"]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            write_result, help_update_result, stack, 
-                            expected_val, start_check_id, ii, cur_G_val, 
-                            local_R_val, old_val, new_val, iii, num_op >>
+            /\ pc' = [pc EXCEPT ![self] = "HP0"]
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, History, 
+                            LogicTime, old_val, new_val, iii, local_R_val, 
+                            _num_op, _start_time, _end_time, value >>
 
 R3(self) == /\ pc[self] = "R3"
-            /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
-            /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
-            /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                            read_result, write_result, help_update_result, 
-                            History, expected_val, start_check_id, ii, 
-                            cur_G_val, local_R_val, old_val, new_val, iii, 
-                            num_op >>
+            /\ IF help_update_result[self] = TRUE
+                  THEN /\ R_locked' = [R_locked EXCEPT ![self] = FALSE]
+                  ELSE /\ TRUE
+                       /\ UNCHANGED R_locked
+            /\ read_result' = [read_result EXCEPT ![self] = local_R_val[self]]
+            /\ pc' = [pc EXCEPT ![self] = "R4"]
+            /\ UNCHANGED << G_val, G_locked, R_val, write_result, 
+                            help_update_result, History, LogicTime, stack, 
+                            expected_val, start_check_id, ii, old_val, new_val, 
+                            iii, local_R_val, _num_op, _start_time, _end_time, 
+                            value >>
 
-reader(self) == R0(self) \/ R1(self) \/ R2(self) \/ R3(self)
+R4(self) == /\ pc[self] = "R4"
+            /\ pc' = [pc EXCEPT ![self] = Head(stack[self]).pc]
+            /\ local_R_val' = [local_R_val EXCEPT ![self] = Head(stack[self]).local_R_val]
+            /\ stack' = [stack EXCEPT ![self] = Tail(stack[self])]
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, History, 
+                            LogicTime, expected_val, start_check_id, ii, 
+                            old_val, new_val, iii, _num_op, _start_time, 
+                            _end_time, value >>
+
+reader(self) == R0(self) \/ R1(self) \/ R3(self) \/ R4(self)
 
 thread_loop(self) == /\ pc[self] = "thread_loop"
-                     /\ IF num_op[self] < MaxNumOp
-                           THEN /\ num_op' = [num_op EXCEPT ![self] = num_op[self] + 1]
+                     /\ IF _num_op[self] < MaxNumOp
+                           THEN /\ _num_op' = [_num_op EXCEPT ![self] = _num_op[self] + 1]
                                 /\ \/ /\ pc' = [pc EXCEPT ![self] = "read"]
                                    \/ /\ pc' = [pc EXCEPT ![self] = "write"]
                            ELSE /\ pc' = [pc EXCEPT ![self] = "Done"]
-                                /\ UNCHANGED num_op
-                     /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
+                                /\ UNCHANGED _num_op
+                     /\ UNCHANGED << G_val, G_locked, R_val, R_locked, 
                                      read_result, write_result, 
-                                     help_update_result, History, stack, 
-                                     expected_val, start_check_id, ii, 
-                                     cur_G_val, local_R_val, old_val, new_val, 
-                                     iii >>
+                                     help_update_result, History, LogicTime, 
+                                     stack, expected_val, start_check_id, ii, 
+                                     old_val, new_val, iii, local_R_val, 
+                                     _start_time, _end_time, value >>
 
 read(self) == /\ pc[self] = "read"
+              /\ LogicTime' = LogicTime + 1
+              /\ _start_time' = [_start_time EXCEPT ![self] = LogicTime']
               /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "reader",
-                                                       pc        |->  "thread_loop" ] >>
+                                                       pc        |->  "P0",
+                                                       local_R_val |->  local_R_val[self] ] >>
                                                    \o stack[self]]
+              /\ local_R_val' = [local_R_val EXCEPT ![self] = 0]
               /\ pc' = [pc EXCEPT ![self] = "R0"]
-              /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                              read_result, write_result, help_update_result, 
-                              History, expected_val, start_check_id, ii, 
-                              cur_G_val, local_R_val, old_val, new_val, iii, 
-                              num_op >>
+              /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                              write_result, help_update_result, History, 
+                              expected_val, start_check_id, ii, old_val, 
+                              new_val, iii, _num_op, _end_time, value >>
+
+P0(self) == /\ pc[self] = "P0"
+            /\ LogicTime' = LogicTime + 1
+            /\ _end_time' = [_end_time EXCEPT ![self] = LogicTime']
+            /\ History' = Append(History, [type |-> "read", data |-> read_result[self], thread |-> self, start_time |-> _start_time[self], end_time |-> _end_time'[self]])
+            /\ pc' = [pc EXCEPT ![self] = "thread_loop"]
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, stack, 
+                            expected_val, start_check_id, ii, old_val, new_val, 
+                            iii, local_R_val, _num_op, _start_time, value >>
 
 write(self) == /\ pc[self] = "write"
-               /\ /\ new_val' = [new_val EXCEPT ![self] = G_val + 1]
-                  /\ old_val' = [old_val EXCEPT ![self] = G_val]
+               /\ LogicTime' = LogicTime + 1
+               /\ _start_time' = [_start_time EXCEPT ![self] = LogicTime']
+               /\ value' = [value EXCEPT ![self] = G_val]
+               /\ /\ new_val' = [new_val EXCEPT ![self] = value'[self] + 1]
+                  /\ old_val' = [old_val EXCEPT ![self] = value'[self]]
                   /\ stack' = [stack EXCEPT ![self] = << [ procedure |->  "writer",
-                                                           pc        |->  "thread_loop",
+                                                           pc        |->  "P1",
                                                            iii       |->  iii[self],
                                                            old_val   |->  old_val[self],
                                                            new_val   |->  new_val[self] ] >>
                                                        \o stack[self]]
                /\ iii' = [iii EXCEPT ![self] = 0]
                /\ pc' = [pc EXCEPT ![self] = "W0"]
-               /\ UNCHANGED << G_val, G_locked, value, R_val, R_locked, 
-                               read_result, write_result, help_update_result, 
-                               History, expected_val, start_check_id, ii, 
-                               cur_G_val, local_R_val, num_op >>
+               /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                               write_result, help_update_result, History, 
+                               expected_val, start_check_id, ii, local_R_val, 
+                               _num_op, _end_time >>
 
-thread_id(self) == thread_loop(self) \/ read(self) \/ write(self)
+P1(self) == /\ pc[self] = "P1"
+            /\ LogicTime' = LogicTime + 1
+            /\ _end_time' = [_end_time EXCEPT ![self] = LogicTime']
+            /\ IF write_result[self] = TRUE
+                  THEN /\ History' = Append(History, [type |-> "write", data |-> value[self] + 1, thread |-> self, start_time |-> _start_time[self], end_time |-> _end_time'[self]])
+                  ELSE /\ TRUE
+                       /\ UNCHANGED History
+            /\ pc' = [pc EXCEPT ![self] = "thread_loop"]
+            /\ UNCHANGED << G_val, G_locked, R_val, R_locked, read_result, 
+                            write_result, help_update_result, stack, 
+                            expected_val, start_check_id, ii, old_val, new_val, 
+                            iii, local_R_val, _num_op, _start_time, value >>
+
+thread_id(self) == thread_loop(self) \/ read(self) \/ P0(self)
+                      \/ write(self) \/ P1(self)
 
 (* Allow infinite stuttering to prevent deadlock on termination. *)
 Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
@@ -583,12 +565,20 @@ ReadAfterWrite == \A i, j \in DOMAIN History : /\ i < j
                                                /\ History[j].type = "read"
                                                => History[j].data >= History[i].data
 
-Linearizability == \A i, j \in DOMAIN History : /\ i < j
-                                                => History[j].data >= History[i].data
+\* Linearizability == \A i, j \in DOMAIN History : /\ i < j
+\*                                                 => History[j].data >= History[i].data
+
+Linearizability == \A i, j \in DOMAIN History : 
+    /\ i < j 
+    /\ History[i].end_time <= History[j].start_time
+    => History[j].data < History[i].data
+
+GlobalAndReplicas == G_locked = FALSE => \E j \in Threads : R_val[j] = G_val
 
 Invariant == /\ Linearizability 
-          /\ Monotonic(History)
-          /\ ReadAfterWrite 
+        \*   /\ Monotonic(History)ß
+        \*   /\ ReadAfterWrite 
           /\ TypeOK
+          /\ GlobalAndReplicas
 
 =============================================================================

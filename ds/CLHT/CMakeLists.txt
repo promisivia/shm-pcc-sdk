@@ -38,7 +38,7 @@ find_library(JemallocLib jemalloc)
 find_library(TbbLib tbb)
 find_package (Threads)
 
-set(SRC_FILE src/clht_lb_res.cc src/clht_gc.cc external/sspfd/sspfd.cc external/ssmem/src/ssmem.cc)
+set(SRC_FILE src/clht_lb_res.cc src/clht_gc.cc src/rlock.cc external/sspfd/sspfd.cc external/ssmem/src/ssmem.cc)
 
 add_library(clht STATIC ${SRC_FILE})
 target_link_libraries(clht shm-lib)

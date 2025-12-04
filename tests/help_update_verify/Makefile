@@ -14,4 +14,11 @@ clean:
 run: $(TARGET)
 	./$(TARGET)
 
+trans:
+	java -cp /home/wfn/toolbox/tla2tools.jar pcal.trans help_update.tla
+	cp help_update.cfg.bkp help_update.cfg
+
+tlc:
+	java -Xmx128g -cp /home/wfn/toolbox/tla2tools.jar tlc2.TLC -checkpoint 360 help_update.tla
+
 .PHONY: all clean run

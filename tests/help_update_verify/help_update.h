@@ -59,66 +59,45 @@ public:
       replica_ptrs[i].store(0, std::memory_order_relaxed);
     }
   }
-  
-  // 内部帮助更新函数：帮助更新所有副本直到锁位清除，并且要设置全局global_ptr为expected_val
-  // @expected_val_first: 期望的值，lock bit没有设置
-  // @start_check_id_first: 调用者线程id
-  // @return: 是否成功
-  uint64_t help_update(uint64_t expected_val_first, uint64_t start_check_id_first) {
-    // 从第start_check_id线程开始，依次帮助更新
-    // 成功条件：所有后续的replicas都更新为expected_val，或者global_ptr是expected_val.0
-    // 失败条件：global_ptr不是expected_val了
-    uint64_t expected_val = expected_val_first;
-    uint64_t start_check_id = start_check_id_first;
 
-restart_global:
-    // 依次更新每个replica，直到所有replica和global都是同一个值
+  // 更新所有副本一轮
+  // @expected_val: 期望的值
+  // @start_check_id: 开始检查的线程id
+  // @return: 只要返回就说明这一轮的update成功了，返回true说明expected_val没有变，返回false说明expected_val变了
+  bool help_update(uint64_t expected_val, uint64_t start_check_id) {
+    // 从第start_check_id线程开始，依次帮助更新
     for (size_t i = start_check_id; i < num_threads; ++i) {
-      // 首先检查global_ptr是否没有锁位且没有被修改，如果满足则返回
+      // (1) 检查global_ptr是否没有锁位且没有被修改，如果满足则返回
       uintptr_t cur_global_ptr = global_ptr.load();
       if (clear_lock_bit(cur_global_ptr) == expected_val && !has_lock_bit(cur_global_ptr)) {
-        return expected_val;
+        return true;
       }
-
-      // 然后尝试依次更新每个replica，直到所有replica和global都是同一个值
+      // (2) 尝试依次更新每个replica
       uintptr_t local_r = replica_ptrs[i].load();
-      // 可以假设有人在一直更新，可以先check是不是已经更新成功了
-      // 这里最后一位已经被清除也没问题
-      if (clear_lock_bit(local_r) == expected_val) {
-        continue;
-      } else {
+      if (clear_lock_bit(local_r) != expected_val) {
         // 需要帮助更新
-        // 但必须先判断是不是因为global变了导致的这个replica被修改
-        if (clear_lock_bit(global_ptr.load()) != expected_val) {
-          // 立刻返回失败，需要从新的value开始
-          start_check_id = 0;
-          expected_val = clear_lock_bit(global_ptr.load());
-          goto restart_global;
+        // (2.1) 先判断是不是因为global变了导致的这个replica被修改
+        cur_global_ptr = global_ptr.load();
+        if (clear_lock_bit(cur_global_ptr) != expected_val) {
+          // 立刻返回失败
+          return false;
         }
-        // 不是因为global变了导致的这个replica被修改，说明这个replica更旧，需要帮助更新
-        if (current_cas(replica_ptrs[i], local_r, set_lock_bit(expected_val))) {
-          continue;
-        } else {
-          // 上次check到CAS中有人更新了replica，重新load replica再试一遍
-          start_check_id = 0;
-          expected_val = clear_lock_bit(global_ptr.load());
-          goto restart_global;
+        // (2.2) 不是因为global变了导致的这个replica被修改，说明这个replica更旧，需要帮助更新
+        if (!current_cas(replica_ptrs[i], local_r, set_lock_bit(expected_val))) {
+          // 帮忙失败，返回当前replica的值
+          return false;
         }
       }
     }
 
-    // 这一轮检查，所有的replica和global的值都更新为expected_val了
-    uintptr_t cur_global_ptr = global_ptr.load();
-    if (clear_lock_bit(cur_global_ptr) == expected_val) {
-      if (current_cas(global_ptr, cur_global_ptr, expected_val)) {
-        return expected_val;
-      }
+    // 第一个成功帮助所有人更新的人，修改全局的global_ptr为expected_val.0
+    if (current_cas(global_ptr, set_lock_bit(expected_val), expected_val)) {
+      // !!! COMMIT POINT of writer !!!
+      return true;
+    } else {
+      // CAS失败，说明global_ptr被其他人更新了，重新开始
+      return false;
     }
-
-    // global_ptr被其他人更新了，或者CAS失败了，重新开始
-    start_check_id = 0;
-    expected_val = clear_lock_bit(global_ptr.load());
-    goto restart_global;
   }
   
   // 更新全局指针
@@ -126,37 +105,19 @@ restart_global:
   bool cas_ptr(uintptr_t old_val, uintptr_t new_val) {
     uintptr_t cur_global = global_ptr.load();
     
-    // 如果当前有锁位，先帮助更新（等待其他更新完成）
+    // (0) 如果当前有锁位，先帮助更新（等待其他更新完成）
     if (has_lock_bit(cur_global)) {
-      cur_global = help_update(clear_lock_bit(cur_global), 0);
+      help_update(clear_lock_bit(cur_global), 0);
     }
 
-    // 步骤1: CAS全局指针为new_val.1
+    // (1) CAS全局指针为new_val.1
     if (!global_ptr.cas(old_val, set_lock_bit(new_val))) {
       // CAS失败，直接返回false交给外面的逻辑处理
       return false;
     }
-    // CAS成功（commit point）
-    
-    // 步骤2: 依次写每个R[i]为A.1
-    for (size_t i = 0; i < num_threads; ++i) {
-      uintptr_t local_r = replica_ptrs[i].load();
-
-      // fast check
-      if (clear_lock_bit(local_r) == new_val) {
-        continue;
-      }
-
-      if (!current_cas(replica_ptrs[i], local_r, set_lock_bit(new_val))) {
-        // CAS失败，且不是因为有人成功更新了replica；说明global_ptr被修改了
-        // 但只可能是因为这一轮的global已经成功更新，但又被改了，还是可以返回true
-        return true;
-      }
-      // 其他：成功更新or已经被其他人更新
-    }
-      
-    // 步骤3: 所有副本都更新完成，清除G的锁位 (写G为A.0)
-    current_cas(global_ptr, set_lock_bit(new_val), new_val);
+    // (2) CAS成功（commit point）
+    // (2.1) 依次写每个R[i]为A.1
+    help_update(new_val, 0);
     // CAS失败，且不是因为有人提前清理了global_ptr；说明global_ptr被修改了
     // 但只可能是因为这一轮的global已经成功更新，但又被改了，还是可以返回true
     return true;
@@ -173,11 +134,15 @@ restart_global:
       
     // Case (1): 如果R[i]以.0结尾，说明当前的R[i]不是更新的G，可以直接从R[i]开始
     if (!has_lock_bit(local_r)) {
+      // !!! COMMIT POINT of reader !!!
       return local_r;
+    } else {
+      // Case (2): 如果R[i]以.1结尾，帮助更新直到所有的replicas和global都是同一个值
+      help_update(clear_lock_bit(local_r), thread_id + 1);
+      // !!! COMMIT POINT of reader !!!
+      replica_ptrs[thread_id].cas(local_r, clear_lock_bit(local_r));
+      return clear_lock_bit(local_r);
     }
-      
-    // Case (2): 如果R[i]以.1结尾，帮助更新直到所有的replicas和global都是同一个值
-    return help_update(clear_lock_bit(local_r), thread_id + 1);
   }
 };
 

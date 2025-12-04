@@ -39,6 +39,9 @@ static inline void mfence() {
 #ifdef __x86_64__
 // x86_64 implementations
 static inline void clflush(const void* data, size_t len, bool fence = true) {
+#ifdef NO_CLFLUSH
+    return;
+#else
     volatile char* ptr = (char*)((unsigned long)data & (~(CACHE_LINE_SIZE - 1)));
     if (fence) mfence();
     for (; ptr < (char*)data + len; ptr += CACHE_LINE_SIZE) {
@@ -49,10 +52,14 @@ static inline void clflush(const void* data, size_t len, bool fence = true) {
 #endif
     }
     if (fence) mfence();
+#endif
 }
 
 static inline void clwb(const void* data, size_t len, bool fence = true) {
-    volatile char* ptr = (char*)((unsigned long)data & (~(CACHE_LINE_SIZE - 1)));
+#ifdef NO_CLFLUSH
+  return;
+#else
+  volatile char* ptr = (char*)((unsigned long)data & (~(CACHE_LINE_SIZE - 1)));
     if (fence) mfence();
     for (; ptr < (char*)data + len; ptr += CACHE_LINE_SIZE) {
 #ifdef USE_CLFLUSH
@@ -64,11 +71,15 @@ static inline void clwb(const void* data, size_t len, bool fence = true) {
 #endif
     }
     if (fence) mfence();
+#endif
 }
 
 #elif defined(__aarch64__)
 // ARM64 implementations
 static inline void clflush(const void* data, size_t len, bool fence = true) {
+#ifdef NO_CLFLUSH
+  return;
+#else
     volatile char* ptr = (char*)((unsigned long)data & (~(CACHE_LINE_SIZE - 1)));
     if (fence) mfence();
     for (; ptr < (char*)data + len; ptr += CACHE_LINE_SIZE) {
@@ -76,9 +87,13 @@ static inline void clflush(const void* data, size_t len, bool fence = true) {
       asm volatile("dsb ish" ::: "memory");
     }
     if (fence) mfence();
+#endif
 }
 
 static inline void clwb(const void* data, size_t len, bool fence = true) {
+#ifdef NO_CLFLUSH
+  return;
+#else
     volatile char* ptr = (char*)((unsigned long)data & (~(CACHE_LINE_SIZE - 1)));
     if (fence) mfence();
     for (; ptr < (char*)data + len; ptr += CACHE_LINE_SIZE) {
@@ -86,6 +101,7 @@ static inline void clwb(const void* data, size_t len, bool fence = true) {
       asm volatile("dsb ish" ::: "memory");
     }
     if (fence) mfence();
+#endif
 }
 #endif
 

@@ -40,10 +40,6 @@ namespace ART_OLC {
         return true;
     }
 
-    void N256::flush() {
-        clwb(children, 256 * sizeof(uint8_t));
-    }
-
     N *N256::getChild(const uint8_t k) const {
         return children[k];
     }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <algorithm> // For std::max
 #include <ctime>     // For clock_gettime, CLOCK_MONOTONIC, timespec
+#include <iostream>
 
 class AtomicRequestQueue {
   using time_point = int64_t;
@@ -115,6 +116,34 @@ public:
 
   operator T() const { return load(); }
 
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
+
   T load(std::memory_order __m = std::memory_order_seq_cst,
          bool nt = true) const {
     if (nt) {
@@ -204,6 +233,34 @@ public:
   }
 
   operator T() const { return load(); }
+
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
          bool nt = true) const {

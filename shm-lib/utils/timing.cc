@@ -52,6 +52,11 @@ void InitStatistics() {
   CallCounter::AddNewEntry("clevel_double_read_count");
   CallCounter::AddNewEntry("clevel_next_level_count");
 #endif
+  // Insert/Update 时间统计（用于 load 阶段和 workload tx 阶段）
+  TimerAverage::AddNewEntry("insert_load");
+  TimerDetailed::AddNewEntry("insert_load");
+  TimerAverage::AddNewEntry("update_workload");
+  TimerDetailed::AddNewEntry("update_workload");
 }
 
 void PrintStatistics() {
@@ -89,4 +94,23 @@ void PrintStatistics() {
   CallCounter::Print("clevel_double_read_count", file);
   CallCounter::Print("clevel_next_level_count", file);
 #endif
+  // 打印 Insert/Update 时间统计
+  {
+    std::ofstream file(dir + current_time + "_insert_update.log");
+    file << "========== Insert Statistics (Load Phase) ==========" << std::endl;
+    TimerAverage::Print("insert_load", file);
+    file << std::endl;
+    file << "Insert Histogram (Load Phase):" << std::endl;
+    TimerDetailed::PrintHistogram("insert_load", 10, 50);
+    file << std::endl;
+    file << "========== Update Statistics (Workload TX) ==========" << std::endl;
+    TimerAverage::Print("update_workload", file);
+    file << std::endl;
+    file << "Update Histogram (Workload TX):" << std::endl;
+    TimerDetailed::PrintHistogram("update_workload", 10, 50);
+    file << std::endl;
+  }
+  // 同时在控制台打印 insert 延迟
+  std::cout << "========== Insert Latency (Load Phase) ==========" << std::endl;
+  TimerAverage::Print("insert_load", std::cout);
 }

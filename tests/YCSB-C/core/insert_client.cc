@@ -10,21 +10,29 @@ namespace ycsbc {
 int InsertClient::Task(Operation &op) { return 0; }
 
 bool InsertClient::DoInsert() {
+  // 统计 load 阶段的 insert 时间
+  TimerAverage timer("insert_load");
+  timer.Start();
+  
+  bool ret;
 #ifdef INT_YCSBC_KEY
   uint64_t key = workload_->NextSequenceNumKey();
-  return (db_[get_db(key)]->Insert(key, key) == DB::kOK);
+  ret = (db_[get_db(key)]->Insert(key, key) == DB::kOK);
 #elif defined(INT_KEY_ADDR)
   OpGeneratorIntKeyAddr op_gen(workload_);
   uint64_t key = workload_->NextSequenceNumKey();
   void *value = workload_->BuildPrefillValue();
-  return (db_[get_db(key)]->Insert(key, (uint64_t)value) == DB::kOK);
+  ret = (db_[get_db(key)]->Insert(key, (uint64_t)value) == DB::kOK);
 #elif defined(YCSB_KEY)
   std::string key = workload_->NextSequenceKey();
   std::vector<DB::KVPair> pairs;
   workload_->BuildValues(pairs);
-  return (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
+  ret = (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
           DB::kOK);
 #endif
+  
+  timer.Stop();
+  return ret;
 }
 
 #ifdef ASYNC_CLIENT
@@ -94,6 +102,10 @@ int InsertClient::TransactionScan(Operation &op, std::atomic<int> &finish, int &
 
 int InsertClient::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
+  // 统计 workload tx 阶段的 update 时间
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -109,6 +121,7 @@ int InsertClient::TransactionUpdate(Operation &op, std::atomic<int> &finish, int
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 
@@ -212,6 +225,10 @@ int InsertClient::TransactionScan(Operation &op) {
 
 int InsertClient::TransactionUpdate(Operation &op) {
   int ret;
+  // 统计 workload tx 阶段的 update 时间
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -224,6 +241,7 @@ int InsertClient::TransactionUpdate(Operation &op) {
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 

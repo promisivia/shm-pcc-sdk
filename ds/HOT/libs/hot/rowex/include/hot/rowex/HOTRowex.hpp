@@ -286,9 +286,7 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline h
 		unsigned int correspondingEntryIndexInPart = currentInsertStackEntry.mSearchResultForInsert.mEntryIndex - (isInUpperPart * numberEntriesInLowerPart);
 		HOTRowexChildPointer const & nodePointerContainingSplitEntries = (isInUpperPart) ? newSplitEntries.mRight : newSplitEntries.mLeft;
 		nodePointerContainingSplitEntries.getNode()->getPointers()[correspondingEntryIndexInPart] = valueToReplace;
-#ifdef NO_CC
-    	clwb(reinterpret_cast <char *> (&nodePointerContainingSplitEntries.getNode()->getPointers()[correspondingEntryIndexInPart]), sizeof(intptr_t));
-#endif
+
 		return newSplitEntries;
 	});
 }
@@ -306,9 +304,6 @@ template<typename ValueType, template <typename> typename KeyExtractor> inline v
 	});
 
 	newNode.getNode()->getPointers()[entryIndex] = splitEntries.mLeft;
-#ifdef NO_CC
-    clwb(reinterpret_cast <char *> (&newNode.getNode()->getPointers()[entryIndex]), sizeof(intptr_t));
-#endif
 	currentNodeStackEntry.updateChildPointer(newNode);
 }
 
@@ -338,9 +333,6 @@ inline HOTRowexChildPointer HOTRowex<ValueType, KeyExtractor>::getNodeAtPath(std
 	HOTRowexChildPointer current = mRoot;
 	for(unsigned int entryIndex : path) {
 		assert(!current.isLeaf());
-#ifdef NO_CC
-		clflush(reinterpret_cast <char *> (&current.getNode()->getPointers()[entryIndex]), sizeof(intptr_t));
-#endif
 		current = current.getNode()->getPointers()[entryIndex];
 	}
 	return current;

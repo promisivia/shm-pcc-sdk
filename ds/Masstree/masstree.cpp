@@ -173,6 +173,10 @@ bool leafnode::tryLock(int &needRestart) {
     upgradeToWriteLockOrRestart(version, needRestart);
     if (needRestart) return false;
 
+#ifdef NO_CC
+    clflush((char *)this, sizeof(leafnode));
+#endif
+
     return true;
 }
 
@@ -185,6 +189,9 @@ void leafnode::upgradeToWriteLockOrRestart(uint64_t &version, int &needRestart) 
 }
 
 void leafnode::writeUnlock(bool isOverWrite) {
+#ifdef NO_CC
+    clflush((char *)this, sizeof(leafnode));
+#endif
     if (isOverWrite)
         typeVersionLockObsolete.fetch_add(0b10);
     else
@@ -200,6 +207,11 @@ uint64_t leafnode::readLockOrRestart(int &needRestart) const {
         needRestart = LOCKED;
     else if (isObsolete(version))
         needRestart = OBSOLETE;
+
+#ifdef NO_CC
+    if (!needRestart)
+        clflush((char *)this, sizeof(leafnode));
+#endif
 
     return version;
 }
@@ -481,10 +493,6 @@ inter_retry:
                 goto from_root;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -529,10 +537,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char*)l,sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
     if (kx_.p >= 0 && l->key(kx_.p) == key) {
@@ -587,10 +591,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -634,10 +634,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -706,10 +702,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -754,10 +746,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
     if (kx_.p < 0) {
@@ -819,10 +807,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -867,10 +851,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -1014,10 +994,6 @@ leaf_retry:
         goto leaf_retry;
     }
 
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
-
     pkx_ = p->key_lower_bound_by(lv->fkey[depth - 1]);
     if (pkx_.p < 0) {
         printf("[correct_layer_root] cannot find layer's root\n");
@@ -1063,10 +1039,6 @@ inter_retry:
             else
                 goto from_root;
         }
-
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
 
         kx_ = p->key_lower_bound(key);
 
@@ -1562,10 +1534,6 @@ inter_retry:
             }
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1606,10 +1574,6 @@ leaf_retry:
         p = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
 
     kx_ = p->key_lower_bound_by(key);
     if (kx_.p >= 0 || key == p->highest_()) {
@@ -1668,10 +1632,6 @@ inter_retry:
             }
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1713,10 +1673,6 @@ leaf_retry:
         goto leaf_retry;
     }
 
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
-
     kx_ = p->key_lower_bound(key);
 
     return p->inter_delete(this, root, depth, lv, kx_, threadInfo);
@@ -1752,10 +1708,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1785,10 +1737,6 @@ leaf_retry:
         else
             goto restart;
     }
-
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
 
@@ -1870,10 +1818,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -1903,10 +1847,6 @@ leaf_retry:
         else
             goto restart;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -1999,10 +1939,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -2031,10 +1967,6 @@ leaf_retry:
             else
                 goto restart;
         }
-
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
 
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);
@@ -2112,10 +2044,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -2144,10 +2072,6 @@ leaf_retry:
             else
                 goto restart;
         }
-
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
 
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);
@@ -2225,10 +2149,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(min);
 
         if (kx_.i >= 0)
@@ -2257,10 +2177,6 @@ leaf_retry:
             else
                 goto restart;
         }
-
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
 
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);

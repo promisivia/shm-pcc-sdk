@@ -76,6 +76,10 @@ int Client::TransactionScan(Operation &op, std::atomic<int> &finish, int &return
 
 int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
+  // 统计 workload tx 阶段的 update 时间
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -91,6 +95,7 @@ int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &retu
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 
@@ -196,6 +201,10 @@ int Client::TransactionScan(Operation &op) {
 
 int Client::TransactionUpdate(Operation &op) {
   int ret;
+  // 统计 workload tx 阶段的 update 时间
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -208,6 +217,7 @@ int Client::TransactionUpdate(Operation &op) {
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 

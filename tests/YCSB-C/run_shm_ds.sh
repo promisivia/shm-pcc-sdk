@@ -1,13 +1,15 @@
 #!/bin/bash
 
+set -e
+
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 db_types=("clht" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
-DB_TYPE="btree_olc"
+DB_TYPE="bwtree"
 MODE="test"
 # DBG_LEVEL=1
 TEST_TYPE="fixed_db"
-# USE_MSG_QUEUE=1
+# USE_MSG_QUEUE=1s
 CONFIG_TYPE=""
 # ENABLE_CAT=""
 ENABLE_SNIPER=0
@@ -15,7 +17,7 @@ PERF=0
 
 # threads actually do the processing
 SERVER_THREADS_N=32
-# threads which dispatch requests
+# threads which dispatch requessts
 CLIENT_THREADS_N=48
 DB_NUM=1
 MACHINE_NR=1
@@ -198,14 +200,14 @@ do_real_task() {
   done
 }
 
-case $MODE in
+case $MODE in 
 "debug")
-	SERVER_THREADS_N=144
-	run_ycsbc "workloada_zipfian_1b.spec" true
+	SERVER_THREADS_N=2
+	run_ycsbc "workloada_zipfian.spec" true
 	;;
 "test-small")
 	SERVER_THREADS_N=32
-	run_ycsbc "workloada_small.spec"
+	run_ycsbc "workloada_zipfian.spec"
 	;;
 "ycsb-a")
 	CLIENT_THREADS_N=48
@@ -229,10 +231,10 @@ case $MODE in
 	;;
 "test")
 	CLIENT_THREADS_N=48
-	thread_nums=(144)
+	thread_nums=(48)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloadb_zipfian.spec"
+		run_ycsbc "workloade.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"
@@ -324,7 +326,7 @@ case $MODE in
 	;;
 "latency_overhead")
 	SERVER_THREADS_N=1
-	run_ycsbc "workloada_zipfian.spec"
+	run_ycsbc "workloada_zipfian_10m.spec"
 	;;
 "server_thread_scale_test")
   type=$CONFIG_TYPE

@@ -34,8 +34,7 @@ struct OptLock {
   std::atomic<uint64_t> typeVersionLockObsolete{0b100};
 #endif
 
-#if defined(NOCC_FLUSH_NODE) ||                                                \
-    (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
+#ifdef NO_CC
   virtual void flushNode() = 0;
   virtual void invalidateNode() = 0;
 #endif
@@ -50,8 +49,7 @@ struct OptLock {
       needRestart = true;
     }
 
-#if defined(NOCC_FLUSH_NODE) ||                                                \
-    (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
+#ifdef NO_CC
     /* Flush the node if lock is acquired */
     if (!needRestart && needFlush)
       invalidateNode();
@@ -70,11 +68,9 @@ struct OptLock {
     upgradeToWriteLockOrRestart(version, needRestart);
     if (needRestart)
       return;
-#if defined(NOCC_FLUSH_NODE) ||                                                \
-    (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
-    else
-      // write lock is acquired, invalidate the node
-      invalidateNode();
+#ifdef NO_CC
+    // write lock is acquired, invalidate the node
+    invalidateNode();
 #endif
   }
 
@@ -89,8 +85,7 @@ struct OptLock {
   }
 
   void writeUnlock(bool needFlush = false) {
-#if defined(NOCC_FLUSH_NODE) ||                                                \
-    (defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE))
+#ifdef NO_CC
     /* Only flush the node if node is modified */
     if (needFlush)
       flushNode();
