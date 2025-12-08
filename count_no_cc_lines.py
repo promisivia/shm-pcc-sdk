@@ -38,13 +38,22 @@ def is_no_cc_condition(condition_text):
     - 多行条件（使用反斜杠续行）
     等等
     
-    注意：如果条件中包含任何以 OPT 开头的宏定义（如 defined(OPT_GC)），则不算作 NO_CC 块
+    注意：
+    1. 如果条件中包含任何以 OPT 开头的宏定义（如 defined(OPT_GC)），则不算作 NO_CC 块
+    2. 如果条件中同时包含其他宏定义（如 USE_CXL, USE_CLWB 等），则不算作纯 NO_CC 块
+    3. 只统计单独的 NO_CC 条件，不统计组合条件（如 NO_CC && USE_CXL）
     """
     # 移除所有空白字符，便于匹配
     normalized = ' '.join(condition_text.split())
     
-    # 检查 #ifdef NO_CC 或 #elif NO_CC（简单的 #ifdef/#elif 不涉及 OPT）
-    if re.search(r'#(?:ifdef|elif)\s+NO_CC\b', normalized):
+    # 检查 #ifdef NO_CC 或 #elif NO_CC（简单的 #ifdef/#elif）
+    ifdef_match = re.search(r'#(?:ifdef|elif)\s+NO_CC\b', normalized)
+    if ifdef_match:
+        # 检查后面是否还有其他内容（可能是 && 或其他宏）
+        after_match = normalized[ifdef_match.end():].strip()
+        # 如果后面还有非空白字符，说明是组合条件，不算作纯 NO_CC 块
+        if after_match and not after_match.startswith('\\'):
+            return False
         return True
     
     # 检查 #if 或 #elif 开头，且包含 defined(NO_CC) 或 defined NO_CC
@@ -61,14 +70,90 @@ def is_no_cc_condition(condition_text):
             if has_opt:
                 return False
             
-            # 包含 NO_CC 且不包含 OPT 开头的宏，算作 NO_CC 块
+            # 检查是否包含其他常见的宏定义（排除组合条件）
+            # 匹配 defined(XXX) 或 defined XXX，其中 XXX 不是 NO_CC
+            other_macros = re.findall(r'defined\s*\(?\s*(\w+)\s*\)?', normalized, re.IGNORECASE)
+            no_cc_variants = {'no_cc', 'no_cc_cas_w_flush', 'no_cc_use_nt', 'no_cc_use_clflush', 
+                            'no_cc_mem_fence', 'no_cc_wo_flush_node', 'no_cas'}
+            
+            # 检查是否有其他非 NO_CC 相关的宏定义
+            for macro in other_macros:
+                macro_lower = macro.lower()
+                # 如果宏名不是 NO_CC 或其变体，说明是组合条件
+                if macro_lower != 'no_cc' and not any(macro_lower.startswith(prefix) for prefix in ['no_cc', 'opt']):
+                    # 检查是否是常见的其他宏（如 USE_CXL, USE_CLWB 等）
+                    if any(keyword in macro_lower for keyword in ['use_', 'enable_', 'alloc_', 'shm_', 'queue_', 'bypass_']):
+                        return False
+            
+            # 检查是否有逻辑运算符 && 或 ||，如果有，说明是组合条件
+            if re.search(r'[&|]{2}', normalized):
+                # 检查是否只有 NO_CC 相关的条件
+                # 移除所有 NO_CC 相关的部分，看是否还有剩余内容
+                temp = normalized
+                temp = re.sub(r'defined\s*\(?\s*NO_CC\s*\)?', '', temp, flags=re.IGNORECASE)
+                temp = re.sub(r'[&|()\s]', '', temp)
+                # 如果还有剩余内容，说明是组合条件
+                if temp:
+                    return False
+            
+            # 包含 NO_CC 且不包含其他宏定义，算作纯 NO_CC 块
+            return True
+    
+    return False
+
+def is_comment_or_empty_line(line):
+    """
+    检查一行是否是注释或空行
+    返回: True 如果是注释或空行，False 否则
+    注意：如果一行有代码也有注释，不算作注释行
+    """
+    stripped = line.strip()
+    
+    # 空行
+    if not stripped:
+        return True
+    
+    # 单行注释（整行都是注释）
+    if stripped.startswith('//'):
+        return True
+    
+    # 多行注释开始（整行都是注释）
+    if stripped.startswith('/*'):
+        # 检查是否在同一行结束
+        if '*/' in stripped:
+            # 检查注释前是否有代码
+            comment_start = stripped.find('/*')
+            before_comment = stripped[:comment_start].strip()
+            if not before_comment:
+                return True
+        else:
+            # 多行注释开始，整行都是注释
+            return True
+    
+    # 多行注释结束标记（整行都是注释）
+    if stripped == '*/' or stripped.startswith('*/'):
+        # 检查注释后是否有代码
+        comment_end = stripped.find('*/') + 2
+        after_comment = stripped[comment_end:].strip()
+        if not after_comment:
+            return True
+    
+    # 检查是否整行都在多行注释中（以 */ 结尾且包含 /*）
+    if '/*' in stripped and '*/' in stripped:
+        comment_start = stripped.find('/*')
+        comment_end = stripped.find('*/') + 2
+        before_comment = stripped[:comment_start].strip()
+        after_comment = stripped[comment_end:].strip()
+        # 如果注释前后都没有代码，算作注释行
+        if not before_comment and not after_comment:
             return True
     
     return False
 
 def count_no_cc_lines_in_file(file_path):
     """
-    统计单个文件中 #ifdef NO_CC 或 #if defined(NO_CC) 到 #else 或 #endif 之间的行数
+    统计单个文件中 #ifdef NO_CC 或 #if defined(NO_CC) 到 #else 或 #endif 之间的代码行数
+    （排除注释和空行）
     支持多行条件编译指令（使用反斜杠续行）
     返回: (总行数, 块数)
     """
@@ -83,12 +168,28 @@ def count_no_cc_lines_in_file(file_path):
     block_count = 0
     in_no_cc_block = False
     ifdef_line = -1
+    in_multiline_comment = False
     
     i = 0
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
         line_num = i + 1
+        
+        # 处理多行注释状态
+        if in_multiline_comment:
+            if '*/' in stripped:
+                in_multiline_comment = False
+            i += 1
+            continue
+        
+        # 检查多行注释开始
+        if '/*' in stripped:
+            comment_end = stripped.find('*/')
+            if comment_end == -1:
+                in_multiline_comment = True
+            i += 1
+            continue
         
         # 检查是否是 #if、#ifdef 或 #elif 开头（可能是多行的）
         if stripped.startswith('#if') or stripped.startswith('#elif'):
@@ -116,20 +217,24 @@ def count_no_cc_lines_in_file(file_path):
                 # 如果之前不在 NO_CC 块中，开始新的块
                 if not in_no_cc_block:
                     in_no_cc_block = True
-                    ifdef_line = condition_line_nums[0]  # 使用第一行的行号
+                    ifdef_line = j  # 从条件编译指令之后开始统计
                     block_count += 1
-                # 如果已经在 NO_CC 块中（可能是从 #if 切换到 #elif），更新起始行
+                # 如果已经在 NO_CC 块中（可能是从 #if 切换到 #elif），先结束之前的块
                 else:
-                    # 统计之前块的行数（从上一个起始行到当前 #elif 之前）
-                    total_lines += (line_num - ifdef_line - 1)
-                    ifdef_line = condition_line_nums[0]  # 更新起始行
+                    # 统计之前块的行数（从上一个起始行到当前 #elif 之前，排除注释和空行）
+                    for k in range(ifdef_line, i):
+                        if k < len(lines) and not is_comment_or_empty_line(lines[k]):
+                            total_lines += 1
+                    ifdef_line = j  # 更新起始行
                 i = j  # 跳过已处理的行
                 continue
             else:
                 # 如果不是 NO_CC 条件，且是 #elif，如果之前在 NO_CC 块中，结束该块
                 if is_elif and in_no_cc_block:
-                    # 统计从起始行到当前 #elif 之前的行数
-                    total_lines += (line_num - ifdef_line - 1)
+                    # 统计从起始行到当前 #elif 之前的行数（排除注释和空行）
+                    for k in range(ifdef_line, i):
+                        if k < len(lines) and not is_comment_or_empty_line(lines[k]):
+                            total_lines += 1
                     in_no_cc_block = False
             
             i = j
@@ -139,16 +244,20 @@ def count_no_cc_lines_in_file(file_path):
         if in_no_cc_block:
             # 检查 #else
             if stripped.startswith('#else'):
-                # 统计从 #ifdef 到 #else 之间的行数（不包括这两行）
-                total_lines += (line_num - ifdef_line - 1)
+                # 统计从起始行到 #else 之前的行数（排除注释和空行）
+                for k in range(ifdef_line, i):
+                    if k < len(lines) and not is_comment_or_empty_line(lines[k]):
+                        total_lines += 1
                 in_no_cc_block = False
                 i += 1
                 continue
             
             # 检查 #endif
             if stripped.startswith('#endif'):
-                # 统计从 #ifdef 到 #endif 之间的行数（不包括这两行）
-                total_lines += (line_num - ifdef_line - 1)
+                # 统计从起始行到 #endif 之前的行数（排除注释和空行）
+                for k in range(ifdef_line, i):
+                    if k < len(lines) and not is_comment_or_empty_line(lines[k]):
+                        total_lines += 1
                 in_no_cc_block = False
                 i += 1
                 continue

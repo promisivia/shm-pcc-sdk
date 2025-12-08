@@ -231,6 +231,19 @@ void HotDB::GetStats() {
   std::cerr << "Read Count: " << read_cnt.load() << " ";
   std::cerr << "Update Count: " << update_cnt.load() << " ";
   std::cerr << "Insert Count: " << insert_cnt.load() << std::endl;
+  
+  // Output HOT tree statistics
+  // auto [totalSize, statistics] = tree.getStatistics();
+  // std::cerr << "=== HOT Tree Statistics ===" << std::endl;
+  // std::cerr << "Tree Height: " << static_cast<uint16_t>(statistics.at("height")) << std::endl;
+  // std::cerr << "Number of Values: " << static_cast<size_t>(statistics.at("numberValues")) << std::endl;
+  // std::cerr << "Total Size: " << totalSize << " bytes" << std::endl;
+  // for (const auto& [key, value] : statistics) {
+  //   if (key != "height" && key != "numberValues") {
+  //     std::cerr << key << ": " << value << std::endl;
+  //   }
+  // }
+  // std::cerr << "===========================" << std::endl;
 }
 
 int HotDB::allocate() {

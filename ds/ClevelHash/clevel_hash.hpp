@@ -105,7 +105,7 @@ public:
 
   using level_meta_ptr_t = nt_pointer<level_meta>;
 
-  constexpr static size_type assoc_num = 4;
+  constexpr static size_type assoc_num = 2;
   constexpr static size_type resize_bulk = 1;
 
   constexpr static size_type partial_ext_bits =
@@ -142,28 +142,6 @@ public:
       return static_cast<difference_type>(
           (static_cast<uint64_t>(idx) ^ hash_of_tag) % (capacity / 2));
     }
-  }
-
-  // 帮助函数：将level_meta指针的后4位设置为-1
-  static level_meta* set_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      (reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF) | 0xF
-    );
-  }
-
-  // 帮助函数：清除level_meta指针的后4位-1标记
-  static level_meta* clear_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return nullptr;
-    return reinterpret_cast<level_meta*>(
-      reinterpret_cast<uintptr_t>(meta_ptr) & ~0xF
-    );
-  }
-
-  // 帮助函数：检查level_meta指针的后4位是否为-1
-  static bool check_meta_neg1_flag(level_meta* meta_ptr) {
-    if (meta_ptr == nullptr) return false;
-    return (reinterpret_cast<uintptr_t>(meta_ptr) & 0xF) == 0xF;
   }
 
   struct ret {
@@ -220,17 +198,17 @@ public:
 
 #ifdef NO_CC
     inline value_type *addr(bool nt = true) {
-      return (value_type *)(p.load(std::memory_order_relaxed, nt) &
+      return (value_type *)(p.load(std::memory_order_seq_cst, nt) &
                             0xFFFFFFFFFFFF);
     }
 
     inline partial_t partial(bool nt = true) {
-      return p.load(std::memory_order_relaxed, nt) >> 48;
+      return p.load(std::memory_order_seq_cst, nt) >> 48;
     }
 
     inline void set_partial(partial_t par) {
       p.store((p & 0xFFFFFFFFFFFF) | ((uint64_t)par << 48),
-              std::memory_order_relaxed, false);
+              std::memory_order_seq_cst, false);
     }
 #else
     inline value_type *addr(bool nt = true) {
@@ -277,7 +255,6 @@ public:
 
     ~KV_entry_ptr_s() {}
 
-#ifdef NO_CC
     inline value_type *addr(bool nt = true) {
       return (value_type *)(p & 0xFFFFFFFFFFFF);
     }
@@ -287,18 +264,6 @@ public:
     inline void set_partial(partial_t par) {
       p = (p & 0xFFFFFFFFFFFF) | ((uint64_t)par << 48);
     }
-#else
-    inline value_type *addr(bool nt = true) {
-      return (value_type *)(p & 0xFFFFFFFFFFFF);
-    }
-
-    inline partial_t partial(bool nt = true) { return p >> 48; }
-
-    inline void set_partial(partial_t par) {
-      p = (p & 0xFFFFFFFFFFFF) | ((uint64_t)par << 48);
-    }
-
-#endif
 
     inline bool operator==(const KV_entry_ptr_s &other) const {
       return p == other.p;
@@ -518,7 +483,7 @@ public:
       tmp_entry.clear();
 
 #ifdef OPT_CLEVEL_ROOT_READ
-      local_meta.clear();
+      meta_replicas.clear();
 #endif
     }
 
@@ -540,12 +505,12 @@ public:
     tmp_level.resize(thread_num);
     tmp_entry.resize(thread_num);
 #ifdef OPT_CLEVEL_ROOT_READ
-    local_meta.resize(thread_num);
+    meta_replicas.resize(thread_num);
     // replica_ptrs has fixed size, no need to resize
-    uintptr_t meta_val = reinterpret_cast<uintptr_t>(meta.load());
     for (size_type i = 0; i < thread_num; i++) {
-      local_meta[i] = meta;
+      meta_replicas[i].store(meta.load());
     }
+    help_update = new HelpUpdate<level_meta>(meta, meta_replicas, thread_num);
 #endif
   }
 
@@ -575,6 +540,10 @@ public:
   void resize();
 
   level_meta_ptr_t meta;
+#ifdef OPT_CLEVEL_ROOT_READ
+  std::vector<level_meta_ptr_t> meta_replicas;
+  HelpUpdate<level_meta> *help_update;
+#endif
 
   struct alignas(CACHE_LINE_SIZE) aligned_level_meta_ptr_t {
     level_meta_ptr_t meta;
@@ -592,57 +561,6 @@ public:
     }
     operator level_meta_ptr_t() { return meta; }
   };
-
-  mutable std::vector<aligned_level_meta_ptr_t> local_meta;
-
-  // inline level_meta_ptr_t &
-  // get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool help_update = true) const {
-  //   if (local_meta[thread_id].meta == nullptr) {
-  //     local_meta[thread_id].meta = meta;
-  //   }
-  //   level_meta_ptr_t m_cleared = clear_meta_neg1_flag(local_meta[thread_id].meta);
-  //   std::cout << "local meta is " << m_cleared << "Original meta is " << local_meta[thread_id].meta << std::endl;
-  //   if (help_update) {
-  //     // TODO: help update local meta
-  //     local_meta[thread_id].meta = m_cleared;
-  //   }
-  //   return m_cleared;
-  // }
-
-  inline level_meta *get_local_meta(size_type thread_id = SimThreadInfo::worker_thread_id, bool nt = true, bool help_update = true) const {
-    if (unlikely(local_meta[thread_id].meta == nullptr)) {
-      local_meta[thread_id].meta = meta;
-    }
-    level_meta *meta = local_meta[thread_id].meta.load(std::memory_order_seq_cst, nt);
-    if (likely(!check_meta_neg1_flag(meta))) {
-      return meta;
-    }
-    level_meta *cleared_meta = clear_meta_neg1_flag(meta);
-    if (!help_update) {
-      return cleared_meta;
-    }
-    // meta is set as locked and requires help update
-    // TODO: if the rehash/update thread crashes, the replicas will never be updated
-    // TODO: set value here is dangerous, as the replica may be updated to a newer value
-    while (true) {
-      // check if all meta is set as local_meta[thread_id]
-      bool all_meta_set = true;
-      for (int i = 0; i < thread_num; i++) {
-        if (clear_meta_neg1_flag(local_meta[i].meta.load()) != cleared_meta) {
-          break;
-        }
-      }
-      // if all meta is set as local_meta[thread_id], then clear the neg1 flag
-      if (all_meta_set) {
-        local_meta[thread_id].meta.store(cleared_meta);
-        return cleared_meta;
-      } else {
-        // load the newest meta and restart the loop
-        cleared_meta = clear_meta_neg1_flag(local_meta[thread_id].meta.load());
-      }
-    }
-    return meta;
-  }
 
   size_type hashpower;
   atomic_type<size_type> thread_num;
@@ -674,11 +592,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 
 
 #ifdef OPT_CLEVEL_ROOT_READ
-#ifdef OPT_NO_META
-  level_meta *m = get_local_meta(SimThreadInfo::worker_thread_id, false, false);
-#else
-  level_meta *m = get_local_meta();
-#endif
+  level_meta *m = help_update->load_ptr(SimThreadInfo::worker_thread_id);
 #else
   level_meta *m = meta.load();
 #endif
@@ -775,7 +689,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = help_update->load_ptr(SimThreadInfo::worker_thread_id);
 #else
     tmp_meta = meta.load();
 #endif
@@ -902,7 +816,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta();
+    tmp_meta = help_update->load_ptr(SimThreadInfo::worker_thread_id);
 #else
     tmp_meta = meta.load();
 #endif
@@ -1131,7 +1045,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = help_update->load_ptr(thread_id);
 #else
     tmp_meta = meta.load();
 #endif
@@ -1190,7 +1104,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
     // Assume we have limited area of cache coherence and we put meta in
     level_meta *m;
 #ifdef OPT_CLEVEL_ROOT_READ
-    m = get_local_meta(thread_id);
+    m = help_update->load_ptr(thread_id);
 #else
     m = meta.load();
 #endif
@@ -1216,7 +1130,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
       uint64_t expected = old_e.p;
       if (e->p.compare_exchange_strong(expected, created.p)) {
 #ifdef OPT_CLEVEL_ROOT_READ
-        if (!m->is_resizing && get_local_meta(thread_id)->is_resizing &&
+        if (!m->is_resizing && help_update->load_ptr(thread_id)->is_resizing &&
             level_num == 0) {
 #else
         if (!m->is_resizing && meta.load()->is_resizing && level_num == 0) {
@@ -1256,9 +1170,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
   bool succ_deletion = false;
 
 #ifdef OPT_CLEVEL_ROOT_READ
-  level_meta *m = reinterpret_cast<level_meta*>(load_ptr(global_ptr, replica_ptrs, replica_ptrs.size(), thread_id % replica_ptrs.size()));
-  // Update local_meta after load_ptr
-  local_meta[thread_id].meta.store(m);
+  level_meta *m = help_update->load_ptr(thread_id);
 #else
   level_meta *m = meta.load();
 #endif
@@ -1298,7 +1210,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // Therefore, we can do context checking
               // to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{help_update->load_ptr(thread_id)};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1340,7 +1252,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
               // CAS. Therefore, we can do context
               // checking to avoid such failures.
 #ifdef OPT_CLEVEL_ROOT_READ
-              level_meta *tmp_meta{get_local_meta(thread_id)};
+              level_meta *tmp_meta{help_update->load_ptr(thread_id)};
 #else
               level_meta *tmp_meta{meta.load()};
 #endif
@@ -1369,7 +1281,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
     // Context checking.
     level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-    tmp_meta = get_local_meta(thread_id);
+    tmp_meta = help_update->load_ptr(thread_id);
 #else
     tmp_meta = meta.load();
 #endif
@@ -1398,7 +1310,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
   bool succ_update = false;
   level_meta *m_copy;
 #ifdef OPT_CLEVEL_ROOT_READ
-  m_copy = get_local_meta(thread_id);
+  m_copy = help_update->load_ptr(thread_id);
 #else
   m_copy = meta.load();
 #endif
@@ -1433,7 +1345,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
         // such failure.
         level_meta *tmp_meta;
 #ifdef OPT_CLEVEL_ROOT_READ
-        m_copy = get_local_meta(thread_id);
+        m_copy = help_update->load_ptr(thread_id);
 #else
         tmp_meta = meta.load();
 #endif
@@ -1499,22 +1411,23 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
             new level_meta(cl->up.load(), m_copy->last_level, true);
       }
 
+#ifdef OPT_CLEVEL_ROOT_READ
+      if (help_update->cas_ptr(m_copy, tmp_meta[t_id])) {
+#else
       if (meta.compare_exchange_strong(m_copy, tmp_meta[t_id])) {
+#endif
 #ifdef CLEVEL_DEBUG
         std::cout << "Thread-" << thread_id
                   << " finishes expanding, capacity: " << capacity()
                   << std::endl;
 #endif
-#ifdef OPT_CLEVEL_ROOT_READ
-        for (int i = 0; i < thread_num; i++) {
-          // 将tmp_meta[t_id]的后4位设置为-1后存储
-          local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
-        }
-        std::cout << "set meta as " << local_meta[0].meta << std::endl;
-#endif
         break;
       } else {
+#ifdef OPT_CLEVEL_ROOT_READ
+        m_copy = help_update->load_ptr(thread_id);
+#else
         m_copy = meta.load();
+#endif
         cl = m_copy->first_level;
 
         if (cl->capacity >= new_capacity && m_copy->is_resizing) {
@@ -1528,7 +1441,11 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
     }
   } else {
     // Ohter threads finished expanding
-    if (meta.load() == m_copy) {
+#ifdef OPT_CLEVEL_ROOT_READ
+      if (help_update->load_ptr(thread_id) == m_copy) {
+#else
+      if (meta.load() == m_copy) {
+#endif
       size_type new_capacity = cl->capacity;
 
       // Update the first_level and is_resizing in the metadata.
@@ -1541,22 +1458,23 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
           assert(cl->up != nullptr);
           tmp_meta[t_id] = new level_meta(cl->up, m_copy->last_level, true);
         }
+#ifdef OPT_CLEVEL_ROOT_READ
+        if (help_update->cas_ptr(m_copy, tmp_meta[t_id])) {
+#else
         if (meta.compare_exchange_strong(m_copy, tmp_meta[t_id])) {
+#endif
 #ifdef CLEVEL_DEBUG
           std::cout << "Thread-" << thread_id
                     << " finishes expanding, capacity: " << capacity()
                     << std::endl;
 #endif
-#ifdef OPT_CLEVEL_ROOT_READ
-          for (int i = 0; i < thread_num; i++) {
-            // 将tmp_meta[t_id]的后4位设置为-1后存储
-            local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
-          }
-          std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
-#endif
           break;
         } else {
+#ifdef OPT_CLEVEL_ROOT_READ
+          m_copy = help_update->load_ptr(thread_id);
+#else
           m_copy = meta.load();
+#endif
           cl = m_copy->first_level;
 
           if (cl->capacity >= new_capacity && m_copy->is_resizing) {
@@ -1581,7 +1499,11 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
   difference_type expand_bucket = 0;
 
   while (run_expand_thread.load()) {
+#ifdef OPT_CLEVEL_ROOT_READ
+    level_meta *m = (help_update != nullptr) ? help_update->load_ptr(SimThreadInfo::worker_thread_id) : meta.load();
+#else
     level_meta *m = meta.load();
+#endif
 
     size_type n_levels = 1;
     if (m != nullptr) {
@@ -1597,7 +1519,11 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
 
     for (size_type ii = 0; ii < resize_bulk; ii++) {
     RETRY_REHASH:
+#ifdef OPT_CLEVEL_ROOT_READ
+      m = (help_update != nullptr) ? help_update->load_ptr(SimThreadInfo::worker_thread_id) : meta.load();
+#else
       m = meta.load();
+#endif
 
       level_bucket *bl = m->last_level;
       level_bucket *tl = m->first_level;
@@ -1673,26 +1599,27 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
           tmp_meta[t_id] =
               new level_meta(m->first_level, bl->up, levels_left != 2);
 
+#ifdef OPT_CLEVEL_ROOT_READ
+          if (help_update != nullptr && help_update->cas_ptr(m, tmp_meta[t_id])) {
+#else
           if (meta.compare_exchange_strong(m, tmp_meta[t_id])) {
+#endif
 #ifdef CLEVEL_DEBUG
             std::cout << "Expand thread updates "
                          "metadata, "
                       << "is_resizing: " << bool(levels_left != 2)
                       << " levels_left: " << levels_left << std::endl;
 #endif
-#ifdef OPT_CLEVEL_ROOT_READ
-            for (int i = 0; i < thread_num; i++) {
-              // 将tmp_meta[t_id]的后4位设置为-1后存储
-              local_meta[i].meta.store(set_meta_neg1_flag(tmp_meta[t_id]));
-            }
-            std::cout << "set meta as " << local_meta[0].meta.load() << std::endl;
-#endif
             rc = true;
             expand_bucket = 0;
             break;
           } else {
             delete tmp_meta[t_id];
+#ifdef OPT_CLEVEL_ROOT_READ
+            m = help_update->load_ptr(SimThreadInfo::worker_thread_id);
+#else
             m = meta.load();
+#endif
           }
         }
 

@@ -119,6 +119,14 @@ void master_process(utils::Properties &props) {
     std::cerr << "Load throughput: 0 ops/ms" << std::endl;
   }
   
+  // Output statistics after loaddata phase, before transaction phase
+  // std::cerr << "\n=== Statistics after LoadData phase ===" << std::endl;
+  // for (uint32_t i = 0; i < SimThreadInfo::worker_db_count; i++) {
+  //   std::cerr << "DB " << i << ":" << std::endl;
+  //   (*dbs)[i]->GetStats();
+  // }
+  // std::cerr << "========================================\n" << std::endl;
+  
   auto machine_list =stoi(props.GetProperty("machinenum", "1")) == 1 ? std::vector<std::string>() :
       FollowerManager::split_machines(props.GetProperty("follower_list"));
   assert(machine_list.size() == SimThreadInfo::worker_machine_count - 1);

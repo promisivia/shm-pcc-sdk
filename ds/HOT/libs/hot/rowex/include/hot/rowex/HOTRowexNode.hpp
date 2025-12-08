@@ -83,6 +83,10 @@ template<typename DiscriminativeBitsRepresentation, typename PartialKeyType>  vo
 		throw std::bad_alloc();
 	}
 #endif
+
+#ifdef NO_CC
+	clflush((char *)memoryForNode, allocationInformation.mTotalSizeInBytes, true);
+#endif
 	return memoryForNode;
 };
 

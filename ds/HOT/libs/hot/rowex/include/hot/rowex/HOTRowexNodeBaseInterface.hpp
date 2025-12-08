@@ -29,11 +29,11 @@ public:
 	/**
 	 * points to the first child pointer contained in this node
 	 */
-#ifdef NO_CC
-	nt<HOTRowexChildPointer*> mFirstChildPointer;
-#else
+// #ifdef NO_CC
+// 	nt<HOTRowexChildPointer*> mFirstChildPointer;
+// #else
 	HOTRowexChildPointer* mFirstChildPointer;
-#endif
+// #endif
 
 	/**
 	 * a mask having all bits set, which corresponds to used entries.
@@ -43,11 +43,11 @@ public:
 	 * If entry with index 0 is used the least significant bit is set.
 	 * It entry with index 31 is used the most significant bit is set.
 	 */
-#ifdef NO_CC
-	nt<uint32_t> mUsedEntriesMask;
-#else
+// #ifdef NO_CC
+// 	nt<uint32_t> mUsedEntriesMask;
+// #else
 	uint32_t mUsedEntriesMask;
-#endif
+// #endif
 
 protected:
 

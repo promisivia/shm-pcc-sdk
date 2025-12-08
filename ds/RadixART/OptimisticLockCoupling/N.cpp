@@ -40,19 +40,18 @@ namespace ART_OLC {
         }
 #ifdef NO_CC
         if (!needRestart) {
-            N::flushNode(this);
+            N::flushNode(const_cast<N*>(this));
         }
 #endif
     }
 
     void N::writeUnlock() {
 #ifdef NO_CC
-        N::flushNode(this);
+        N::flushNode(const_cast<N*>(this));
 #endif
         typeVersionLockObsolete.fetch_add(0b10);
     }
 
-#ifdef NO_CC
     N *N::getAnyChild(const N *node) {
         switch (node->getType()) {
             case NTypes::N4: {
@@ -75,7 +74,6 @@ namespace ART_OLC {
         assert(false);
         __builtin_unreachable();
     }
-#endif
 
     bool N::change(N *node, uint8_t key, N *val) {
         switch (node->getType()) {
@@ -287,7 +285,7 @@ namespace ART_OLC {
             needRestart = true;
         }
 #ifdef NO_CC
-        if (!needRestart) { 
+        if (!needRestart) {
             N::flushNode(const_cast<N*>(this));
         }
 #endif
@@ -444,29 +442,34 @@ namespace ART_OLC {
         __builtin_unreachable();
     }
 
+#ifdef NO_CC
     void N::flushNode(N *node) {
+#ifdef NO_CLFLUSH
+        return;
+#endif
         switch (node->getType()) {
             case NTypes::N4: {
                 auto n = static_cast<N4*>(node);
-                clflush(n, sizeof(N4));
+                clflush(n, sizeof(N4), true);
                 break;
             }
             case NTypes::N16: {
                 auto n = static_cast<N16 *>(node);
-                clflush(n, sizeof(N16));
+                clflush(n, sizeof(N16), true);
                 break;
             }
             case NTypes::N48: {
                 auto n = static_cast<N48 *>(node);
-                clflush(n, sizeof(N48));
+                clflush(n, sizeof(N48), true);
                 break;
             }
             case NTypes::N256: {
                 auto n = static_cast<N256 *>(node);
-                clflush(n, sizeof(N256));
+                clflush(n, sizeof(N256), true);
                 break;
             }
         }
         memory_fence();
     }
+#endif
 }

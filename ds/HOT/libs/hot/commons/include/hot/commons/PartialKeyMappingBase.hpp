@@ -14,13 +14,13 @@ namespace hot { namespace commons {
  */
 class PartialKeyMappingBase {
 public:
-#ifdef NO_CC
-	nt<uint16_t> mMostSignificantDiscriminativeBitIndex;
-	nt<uint16_t> mLeastSignificantDiscriminativeBitIndex;
-#else
+// #ifdef NO_CC
+// 	nt<uint16_t> mMostSignificantDiscriminativeBitIndex;
+// 	nt<uint16_t> mLeastSignificantDiscriminativeBitIndex;
+// #else
 	uint16_t mMostSignificantDiscriminativeBitIndex;
 	uint16_t mLeastSignificantDiscriminativeBitIndex;
-#endif
+// #endif
 
 protected:
 	//This does not initialize the fields and is only allowed to be called from subclasses

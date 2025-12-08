@@ -228,6 +228,17 @@ void MasstreeDB::GetStats() {
   std::cerr << "Read Count: " << read_cnt.load() << " ";
   std::cerr << "Update Count: " << update_cnt.load() << " ";
   std::cerr << "Insert Count: " << insert_cnt.load() << std::endl;
+
+  // Add Masstree-specific statistics
+  auto [totalSize, statistics] = tree->getStatistics();
+  std::cerr << "=== Masstree Statistics ===" << std::endl;
+  std::cerr << "Max B+Tree Height: " << static_cast<uint32_t>(statistics.at("maxBTreeHeight")) << std::endl;
+  std::cerr << "Max Trie Depth: " << static_cast<uint32_t>(statistics.at("maxTrieDepth")) << std::endl;
+  std::cerr << "Total Nodes: " << static_cast<size_t>(statistics.at("nodeCount")) << std::endl;
+  std::cerr << "Leaf Nodes: " << static_cast<size_t>(statistics.at("leafCount")) << std::endl;
+  std::cerr << "Internal Nodes: " << static_cast<size_t>(statistics.at("internalCount")) << std::endl;
+  std::cerr << "Total Size: " << totalSize << " bytes" << std::endl;
+  std::cerr << "===========================" << std::endl;
 }
 
 int MasstreeDB::allocate() {
