@@ -5,7 +5,7 @@
 #include "core/db.h"
 #include "utils/config.h"
 #include "shm/cxl_type.h"
-#include <libpmemobj++/experimental/clevel_hash.hpp>
+#include "clevel_hash.hpp"
 
 namespace ycsbc {
 
@@ -69,13 +69,7 @@ private:
   using clevel_hash_64 = clevel_hash<uint64_t, uint64_t>;
   clevel_hash_64 *level;
 #else
-  typedef nvobj::experimental::clevel_hash<nvobj::p<uint64_t>,
-                                           nvobj::p<uint64_t>>
-      persistent_map_type;
-  struct root {
-    nvobj::persistent_ptr<persistent_map_type> cons;
-  };
-  nvobj::pool<root> pop;
+  clevel_hash<uint64_t, uint64_t> *level;
 #endif
   int thread_num;
   cxl_vector<std::atomic<uint8_t>> bits;
