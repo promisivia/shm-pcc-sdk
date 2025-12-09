@@ -41,9 +41,46 @@ void DSM::registerThread() {
   }
 }
 
+void nt_memcpy(void* dst, const void* src, size_t size)
+{
+    uintptr_t p = (uintptr_t)dst;
+    uintptr_t s = (uintptr_t)src;
+    size_t offset = 0;
+
+    // --- Step 1: fix alignment ---
+    // Align dst to 16 bytes
+    size_t misalign = p & 0x0F;
+    if (misalign) {
+        size_t ahead = 16 - misalign;
+        if (ahead > size) ahead = size;
+
+        // fall back to safe store
+        for (size_t i = 0; i < ahead; ++i)
+            ((char*)dst)[i] = ((char*)src)[i];
+
+        offset += ahead;
+    }
+
+    // --- Step 2: streaming block copy ---
+    size_t n = (size - offset) / 16;
+
+    for (size_t i = 0; i < n; ++i) {
+        __m128i v = _mm_loadu_si128((__m128i const*)((char*)src + offset + i*16));
+        _mm_stream_si128((__m128i*)((char*)dst + offset + i*16), v);
+    }
+
+    // --- Step 3: tail ---
+    offset += n * 16;
+    for (size_t i = offset; i < size; ++i)
+        ((char*)dst)[i] = ((char*)src)[i];
+
+    _mm_sfence();
+}
+
 void DSM::read(char *buffer, GlobalAddress gaddr, size_t size, bool signal,
                CoroContext *ctx) {
-  std::memcpy(buffer, reinterpret_cast<char *>(gaddr.val), size);
+  // std::memcpy(buffer, reinterpret_cast<char *>(gaddr.val), size);
+  nt_memcpy(buffer, reinterpret_cast<char *>(gaddr.val), size);
   if (ctx != nullptr) {
     (*ctx->yield)(*ctx->master);
   }
@@ -57,7 +94,8 @@ void DSM::read_sync(char *buffer, GlobalAddress gaddr, size_t size,
 
 void DSM::write(const char *buffer, GlobalAddress gaddr, size_t size,
                 bool signal, CoroContext *ctx) {
-  std::memcpy(reinterpret_cast<char *>(gaddr.val), buffer, size);
+  // std::memcpy(reinterpret_cast<char *>(gaddr.val), buffer, size);
+  nt_memcpy(reinterpret_cast<char *>(gaddr.val), buffer, size);
   if (ctx != nullptr) {
     (*ctx->yield)(*ctx->master);
   }
@@ -72,7 +110,8 @@ void DSM::write_batch(CXLOpRegion *rs, int k, bool signal, CoroContext *ctx) {
   for (int i = 0; i < k; ++i) {
     char *source = static_cast<char *>(reinterpret_cast<void *>(rs[i].source));
     void *destination = reinterpret_cast<void *>(rs[i].dest);
-    std::memcpy(destination, source, rs[i].size);
+    // std::memcpy(destination, source, rs[i].size);
+    nt_memcpy(destination, source, rs[i].size);
   }
   if (ctx != nullptr) {
     (*ctx->yield)(*ctx->master);
