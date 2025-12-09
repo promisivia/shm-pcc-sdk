@@ -10,6 +10,9 @@ std::unordered_map<std::string, std::atomic<uint64_t>>
 std::unordered_map<std::string, std::atomic<uint64_t>>
     TimerAverage::elapsed_counts_;
 
+std::unordered_map<std::string, uint64_t> TimerAverageRdtsc::elapsed_times_;
+std::unordered_map<std::string, uint64_t> TimerAverageRdtsc::elapsed_counts_;
+
 std::unordered_map<std::string,
                    tbb::concurrent_vector<std::chrono::nanoseconds>>
     TimerDetailed::elapsed_times_;
@@ -57,6 +60,20 @@ void InitStatistics() {
   TimerDetailed::AddNewEntry("insert_load");
   TimerAverage::AddNewEntry("update_workload");
   TimerDetailed::AddNewEntry("update_workload");
+#ifdef PLOAD_GC_STAT
+  TimerAverage::AddNewEntry("pload_gc_stat");
+#endif
+#ifdef PLOAD_ROOT_STAT
+  TimerAverage::AddNewEntry("pload_root_stat");
+#endif
+#ifdef PLOAD_COMMON_STAT
+  TimerAverage::AddNewEntry("pload_common_stat");
+#endif
+#ifdef MSG_FUNC_TIMING
+  TimerAverage::AddNewEntry("msg_timing_func");
+#endif
+  // TimerAverage::AddNewEntry("bwtree_read");
+  // TimerAverage::AddNewEntry("bwtree_gc");
 }
 
 void PrintStatistics() {
@@ -65,11 +82,11 @@ void PrintStatistics() {
 
   std::string current_time = GetCurrentTimeString();
 #ifdef QUEUE_LEN_PERF
-  std::ofstream file(dir + current_time + ".log");
+  std::ofstream file(dir + "queue_len_perf" + ".log");
   Logger<size_t>::Print("queue_len", file);
 #endif
 #ifdef QUEUE_LATENCY
-  std::ofstream file(dir + current_time + ".log");
+  std::ofstream file(dir + "queue_latency" + ".log");
   TimerAverage::Print("queue_latency", file);
 #endif
 #ifdef TRX_LATENCY
@@ -113,4 +130,24 @@ void PrintStatistics() {
   // 同时在控制台打印 insert 延迟
   std::cout << "========== Insert Latency (Load Phase) ==========" << std::endl;
   TimerAverage::Print("insert_load", std::cout);
+#ifdef PLOAD_GC_STAT
+  std::ofstream file_pload_gc_stat(dir + "pload_gc_stat" + ".log");
+  TimerAverage::Print("pload_gc_stat", file_pload_gc_stat);
+#endif
+#ifdef PLOAD_ROOT_STAT
+  std::ofstream file_pload_root_stat(dir + "pload_root_stat" + ".log");
+  TimerAverage::Print("pload_root_stat", file_pload_root_stat);
+#endif
+#ifdef PLOAD_COMMON_STAT
+  std::ofstream file_pload_common_stat(dir + "pload_common_stat" + ".log");
+  TimerAverage::Print("pload_common_stat", file_pload_common_stat);
+#endif
+#ifdef MSG_FUNC_TIMING
+  std::ofstream file_msg_func_timing(dir + "msg_timing_func" + ".log");
+  TimerAverage::Print("msg_timing_func", file_msg_func_timing);
+#endif
+  // std::ofstream file_bwtree_read(dir + "bwtree_read" + ".log");
+  // TimerAverage::Print("bwtree_read", file_bwtree_read);
+  // std::ofstream file_bwtree_read_gc(dir + "bwtree_read_gc" + ".log");
+  // TimerAverage::Print("bwtree_gc", file_bwtree_read_gc);
 }

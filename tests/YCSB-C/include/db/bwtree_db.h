@@ -25,20 +25,25 @@ class BwTreeDB : public DB {
   int ThreadInit() override;
   void ThreadClose(int thread_id) override;
 
+  [[deprecated("Use ReadInternal instead.")]]
   int Read(const std::string& table, const std::string& key,
            const std::vector<std::string>* fields,
            std::vector<KVPair>& result) override;
 
+  [[deprecated("Use ScanInternal instead.")]]
   int Scan(const std::string& table, const std::string& key, int len,
            const std::vector<std::string>* fields,
            std::vector<std::vector<KVPair>>& result) override;
 
+  [[deprecated("Use UpdateInternal instead.")]]
   int Update(const std::string& table, const std::string& key,
              std::vector<KVPair>& values) override;
 
+  [[deprecated("Use InsertInternal instead.")]]
   int Insert(const std::string& table, const std::string& key,
              std::vector<KVPair>& values) override;
 
+  [[deprecated("Use DeleteInternal instead.")]]
   int Delete(const std::string& table, const std::string& key) override;
 
   int ReadInternal(uint64_t key, uint64_t &value) override;

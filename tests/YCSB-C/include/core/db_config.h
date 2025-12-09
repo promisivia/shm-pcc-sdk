@@ -2,6 +2,10 @@
 
 // (STRING / INT)
 // #define INT_YCSBC_KEY
+#include "core/utils.h"
+#include <cstdint>
+#include <iostream>
+#include <string>
 #define INT_KEY_ADDR
 // #define YCSB_KEY
 
@@ -15,5 +19,16 @@
 #endif
 
 #ifdef INT_KEY_ADDR
-#define VALUE_ADDR_SIZE 8
+#define VALUE_ADDR_SIZE_DEFAULT 8
+extern uint32_t VALUE_ADDR_SIZE;
 #endif
+
+inline void set_value_size(uint32_t size) {
+  if (size == 0) {
+    std::cerr << "Value size undefined." << ' ' << "Using default value size "
+              << VALUE_ADDR_SIZE_DEFAULT << "." << std::endl;
+    VALUE_ADDR_SIZE = VALUE_ADDR_SIZE_DEFAULT;
+    return;
+  }
+  VALUE_ADDR_SIZE = size;
+}

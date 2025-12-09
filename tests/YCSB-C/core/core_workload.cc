@@ -172,6 +172,7 @@ void CoreWorkload::Init(utils::Properties &p) {
   }
 
   #ifdef INT_KEY_ADDR
+  std::cerr << "Using INT_KEY_ADDR workload settings." << " VALUE SIZE = " << VALUE_ADDR_SIZE << std::endl;
   prefill_val_size_generator_ = new ConstGenerator(VALUE_ADDR_SIZE);
   transaction_val_size_generator_ = new ConstGenerator(VALUE_ADDR_SIZE);
   #endif

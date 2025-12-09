@@ -137,12 +137,18 @@ class MPMCQueue {
           item = std::move(slot.value);
           slot.turn.store(turn(current_head) * 2 + 2,
                           std::memory_order_release);
+          #ifdef QUEUE_LATENCY
+              timer.Stop();
+          #endif
           return true;
         }
       } else {
         auto const prev_head = current_head;
         current_head = head.load(std::memory_order_acquire);
         if (current_head == prev_head) {
+          #ifdef QUEUE_LATENCY
+              timer.Stop();
+          #endif
           return false;
         }
       }
@@ -169,9 +175,9 @@ class MPMCQueue {
     nt<size_t> turn{0};
   };
 
-  alignas(64) nt_pointer<T_wrapper[]> buffer;
   nt<size_t> head{0};
   nt<size_t> tail{0};
+  alignas(64) nt_pointer<T_wrapper[]> buffer;
 #ifdef QUEUE_LEN_PERF
   Logger<size_t> len_stat{std::string("queue_len")};
 #endif

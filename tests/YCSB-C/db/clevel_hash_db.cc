@@ -1,10 +1,6 @@
 #include "db/clevel_hash_db.h"
 
 #include <cstdint>
-#include <filesystem>
-
-#include "utils/sim_id.h"
-#include "core/utils.h"
 
 namespace ycsbc {
 CLevelHashDB::CLevelHashDB(int thread_num)
@@ -51,7 +47,7 @@ CLevelHashDB::~CLevelHashDB() {
 #endif
 }
 
-int CLevelHashDB::ReadInternal(uint64_t key, uint64_t &value) {
+int CLevelHashDB::ReadInternal(uint64_t key, uintptr_t &value) {
 #ifdef LOCAL_NO_CC
   auto ret = level->search(key);
 #else
@@ -60,14 +56,15 @@ int CLevelHashDB::ReadInternal(uint64_t key, uint64_t &value) {
 #endif
   if (ret.found) {
     value = ret.value->second;
+    utils::AccessValueByAddress(value);
     return DB::kOK;
   } else {
     return DB::kErrorNoData;
   }
 }
 
-int CLevelHashDB::UpdateInternal(uint64_t key, uint64_t value) {
-  std::pair<uint64_t, uint64_t> pair(key, value);
+int CLevelHashDB::UpdateInternal(uint64_t key, uintptr_t value) {
+  std::pair<uint64_t, uintptr_t> pair(key, value);
 #ifdef LOCAL_NO_CC
   level->update(pair, SimThreadInfo::worker_thread_id);
 #else
@@ -78,8 +75,8 @@ int CLevelHashDB::UpdateInternal(uint64_t key, uint64_t value) {
   return DB::kOK;
 }
 
-int CLevelHashDB::InsertInternal(uint64_t key, uint64_t value) {
-  std::pair<uint64_t, uint64_t> pair(key, value);
+int CLevelHashDB::InsertInternal(uint64_t key, uintptr_t value) {
+  std::pair<uint64_t, uintptr_t> pair(key, value);
 #ifdef LOCAL_NO_CC
   level->insert(pair, SimThreadInfo::worker_thread_id, key);
 #else
@@ -138,6 +135,7 @@ void CLevelHashDB::PoolThreadClose(int thread_id) {
   release(thread_id);
 }
 
+[[deprecated("Use ReadInternal instead.")]]
 int CLevelHashDB::Read(uint64_t key, uint64_t &value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -168,6 +166,7 @@ int CLevelHashDB::Read(uint64_t key, uint64_t &value) {
 #endif
 }
 
+[[deprecated("Use UpdateInternal instead.")]]
 int CLevelHashDB::Update(uint64_t key, uint64_t value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -198,6 +197,7 @@ int CLevelHashDB::Update(uint64_t key, uint64_t value) {
 #endif
 }
 
+[[deprecated("Use InsertInternal instead.")]]
 int CLevelHashDB::Insert(uint64_t key, uint64_t value) {
 #ifdef USE_MSG_QUEUE
   int finish = false;
@@ -228,6 +228,7 @@ int CLevelHashDB::Insert(uint64_t key, uint64_t value) {
 #endif
 }
 
+[[deprecated("Use DeleteInternal instead.")]]
 int CLevelHashDB::Delete(uint64_t key) {
 #ifdef USE_MSG_QUEUE
   int finish = false;

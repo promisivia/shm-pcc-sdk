@@ -145,18 +145,15 @@ void master_process(utils::Properties &props) {
             << "filename\t"
             << ((props.GetProperty("tracename", "") != "")
                     ? props["workloadname"]
-                    : props["workload_file"])
-            << std::endl;
+                    : props["workload_file"]) << '\n'
+            << "value size\t" << int(VALUE_ADDR_SIZE) << '\n';
   // print_define();
   std::cerr << "dispatcher\t" << SimThreadInfo::dispatcher_thread_count << '\n'
             << "worker\t" << SimThreadInfo::worker_thread_count << '\n'
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
-            << "throughput\t" << "\033[31m" << (sum / duration / 1000000) << " Mops/s" << "\033[0m\n"
+            << "throughput\t" << (sum / duration / 1000000) << " Mops/s\n"
+            << "duration(s)\t" << duration << '\n'
             << "total operations\t" << sum << '\n';
-#ifdef TRX_LATENCY
-  TimerAverage::Print("read_latency", std::cerr);
-  TimerAverage::Print("update_latency", std::cerr);
-#endif
 
   PrintStatistics();
 
@@ -225,6 +222,8 @@ int main(const int argc, const char *argv[]) {
 
   int num_db = stoi(props.GetProperty("dbnum", "1"));
   SimThreadInfo::setup_worker_db_count(num_db);
+
+  set_value_size(std::stoi(props.GetProperty("valuesize", "0")));
 
 #ifdef CLEAR_CACHE
   uint64_t *clear_cache = new uint64_t[1024 * 1024 * 1024 / sizeof(uint64_t)];

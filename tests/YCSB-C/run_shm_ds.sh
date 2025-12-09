@@ -16,13 +16,14 @@ ENABLE_SNIPER=0
 PERF=0
 
 # threads actually do the processing
-SERVER_THREADS_N=32
-# threads which dispatch requessts
+SERVER_THREADS_N=144
+# threads which dispatch requests
 CLIENT_THREADS_N=48
 DB_NUM=1
 MACHINE_NR=1
 FOLLOWER_LIST="localhost"
 CONFIG_PATH="config.ini"
+VALUE_SIZE=8
 
 output_file="output.txt"
 throughput_file="throughput.txt"
@@ -37,6 +38,7 @@ real_workloads=(
 db_nums=(1)
 thread_nums=(1 2 4 8 16 32 64 128)
 client_thread_nums=(2 4 8 16 32 64 128)
+value_size_nums=(8 64 512 1024 4096)
 
 # args: 1. -db=DB_TYPE, 2. -debug=DBG_LEVEL, 3. -test_type=TEST_TYPE, 4. -use-msg=USE_MSG_QUEUE
 for i in "$@"; do
@@ -170,13 +172,13 @@ run_cmd() {
 
 run_ycsbc() {
     local debug=${2:-false}
-    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\" -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -P \"workloads/$1\" -C $CONFIG_PATH"
+    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\" -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -P \"workloads/$1\" -C $CONFIG_PATH"
     run_cmd "$cmd" $debug
 }
 
 run_real() {
     local debug=${2:-false}
-    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -tracepath \"/disk/cwj/cache-trace/samples\" -tracename \"2020Mar\" -workloadname $1 -C $CONFIG_PATH"
+    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -tracepath \"/disk/cwj/cache-trace/samples\" -tracename \"2020Mar\" -workloadname $1 -C $CONFIG_PATH"
     run_cmd "$cmd" $debug
 }
 
@@ -481,6 +483,22 @@ case $MODE in
 	for db_type in "${db_types[@]}"; do
 	./ycsbc -db "$db_type" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -P "workloads/workloada.spec"
 	sleep 5
+	done
+	;;
+"various-value-size")
+	db_types=("bwtree" "clevelhash")
+	# workloads=("workloada_zipfian.spec" "workloadb_zipfian.spec" "workloadc_zipfian.spec")
+	workloads=("workloada_zipfian_100m.spec" "workloadb_zipfian_100m.spec" "workloadc_zipfian_100m.spec")
+	value_size_nums=(8 64 512 1024 4096)
+	for db_type in "${db_types[@]}"; do
+		DB_TYPE=$db_type
+		for workload in "${workloads[@]}"; do
+			for value_size in "${value_size_nums[@]}"; do
+				VALUE_SIZE=$value_size
+				run_ycsbc $workload
+				sleep 1
+			done
+		done
 	done
 	;;
 *)

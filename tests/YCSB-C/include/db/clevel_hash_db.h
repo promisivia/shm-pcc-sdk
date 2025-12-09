@@ -5,7 +5,7 @@
 #include "core/db.h"
 #include "utils/config.h"
 #include "shm/cxl_type.h"
-#include "clevel_hash.hpp"
+#include <libpmemobj++/experimental/clevel_hash.hpp>
 
 namespace ycsbc {
 
@@ -23,20 +23,24 @@ public:
   //            std::vector<KVPair> &values);
   // int Delete(const std::string &table, const std::string &key);
 
-  int ReadInternal(uint64_t key, uint64_t &value) override;
+  int ReadInternal(uint64_t key, uintptr_t &value) override;
 
-  int UpdateInternal(uint64_t key, uint64_t value) override;
+  int UpdateInternal(uint64_t key, uintptr_t value) override;
 
-  int InsertInternal(uint64_t key, uint64_t value) override;
+  int InsertInternal(uint64_t key, uintptr_t value) override;
 
   int DeleteInternal(uint64_t key) override;
 
+  [[deprecated("Use ReadInternal instead.")]]
   int Read(uint64_t key, uint64_t &value) override;
 
+  [[deprecated("Use UpdateInternal instead.")]]
   int Update(uint64_t key, uint64_t value) override;
 
+  [[deprecated("Use InsertInternal instead.")]]
   int Insert(uint64_t key, uint64_t value) override;
 
+  [[deprecated("Use DeleteInternal instead.")]]
   int Delete(uint64_t key) override;
 
   // void Init() override;

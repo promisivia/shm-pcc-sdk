@@ -4,3 +4,5 @@ memory-bank
 build
 .cache
 *.txt
+compile_commands.json
+*.svg
