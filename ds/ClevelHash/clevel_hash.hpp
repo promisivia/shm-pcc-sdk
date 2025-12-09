@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <new>
 #include <thread>
 
 #include "utils/atomic_pointer.h"
@@ -100,9 +101,7 @@ public:
 
   // using KV_entry_ptr_t = nt_pointer<value_type>;
 
-  using level_ptr_t = nt_pointer<level_bucket>;
-  using level_ptr_s = level_bucket *;
-
+  using level_ptr_t = level_bucket *;
   using level_meta_ptr_t = nt_pointer<level_meta>;
 
   constexpr static size_type assoc_num = 2;
@@ -276,56 +275,36 @@ public:
 
   struct bucket {
     KV_entry_ptr_u slots[assoc_num];
-
-#ifdef NT_SIM
-    void flush_no_fence() {
-      for (int i = 0; i < assoc_num; i++) {
-        slots[i].p.flush();
-      }
-    }
-    void write_back() {
-      for (int i = 0; i < assoc_num; i++) {
-        slots[i].p.write_back();
-      }
-    }
-#else
-    void flush_no_fence() const noexcept {
-#ifdef NO_CC
-      clflush(this, sizeof(*this), false);
-#endif
-    }
-    void write_back() const noexcept {
-#ifdef NO_CC
-      clwb(this, sizeof(*this));
-#endif
-    }
-#endif
-  };
-
-  struct bucket_s {
-    KV_entry_ptr_s slots[assoc_num];
-
-    bucket_s(const bucket &ptr, bool nt = true) {
-      if (nt) {
-        ptr.flush_no_fence();
-        mfence();
-      }
-      memcpy(slots, ptr.slots, sizeof(KV_entry_ptr_s) * assoc_num);
-    }
   };
 
   struct level_bucket {
-    nt_pointer<bucket[]> buckets;
-    atomic_type<uint64_t> capacity;
-    level_ptr_t up;
+    struct bucket *buckets;
+    uint64_t capacity;
+    atomic_type<level_ptr_t> up;
 
-    void clear() { buckets.free(); }
+    level_bucket() : buckets(nullptr), capacity(0), up(nullptr) {}
+
+    void allocate(uint64_t capacity) {
+#ifdef USE_CXL
+      this->buckets = new (cacheable.malloc(capacity * sizeof(bucket))) bucket[capacity];
+#else
+      this->buckets = new bucket[capacity];
+#endif
+    }
+
+    void clear() {
+#ifdef USE_CXL
+      cacheable.free(buckets);
+#else
+      delete[] buckets;
+#endif
+    }
   };
 
   struct level_meta {
     level_ptr_t first_level;
     level_ptr_t last_level;
-    atomic_type<char> is_resizing;
+    char is_resizing;
 
     level_meta() {
       first_level = nullptr;
@@ -367,14 +346,14 @@ public:
 
     tmp = new level_bucket();
     capacity = 1 << hashpower;
-    tmp->buckets.allocate(capacity);
+    tmp->allocate(capacity);
     tmp->capacity = capacity;
     tmp->up = nullptr;
     m->first_level = tmp;
 
     tmp = new level_bucket();
     capacity = 1 << (hashpower - 1);
-    tmp->buckets.allocate(capacity);
+    tmp->allocate(capacity);
     tmp->capacity = capacity;
     tmp->up = m->first_level;
     m->last_level = tmp;
@@ -602,61 +581,19 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
     // Bottom-to-top search.
     level_bucket *li = nullptr, *next_li = m->last_level;
 
-#ifdef OPT_BATCH_FLUSH
-    level_bucket *backup_last_level = m->last_level;
-    level_bucket *backup_first_level = m->first_level;
-    std::vector<std::pair<difference_type, bucket *>> possible_buckets;
-    possible_buckets.reserve(8);
-    do {
-      li = next_li;
-      level_bucket *cl = li;
-      difference_type f_idx =
-          first_index(hv, cl->capacity.load(std::memory_order_seq_cst, false));
-      difference_type s_idx = second_index(
-          partial, f_idx, cl->capacity.load(std::memory_order_seq_cst, false));
-
-      possible_buckets.emplace_back(f_idx, &cl->buckets[f_idx]);
-      possible_buckets.emplace_back(s_idx, &cl->buckets[s_idx]);
-      next_li = li->up;
-    } while (li != m->first_level);
-    mfence();
-    for (size_t i = 0; i < possible_buckets.size(); i++) {
-      possible_buckets[i].second->flush_no_fence();
-    }
-    mfence();
-
-    for (size_t b = 0; b < possible_buckets.size(); b++) {
-      bucket &f_b = *(possible_buckets[b].second);
-      for (size_type j = 0; j < assoc_num; j++) {
-        KV_entry_ptr_s slot = f_b.slots[j];
-        if (slot.partial() == partial && slot.addr() != nullptr) {
-          if (key_equal{}(slot.addr()->first, key)) {
-            return ret(b / 2, possible_buckets[b].first, j, slot.addr());
-          }
-        }
-      }
-    }
-#else
     difference_type f_idx, s_idx;
     size_type i = 0;
     do {
       li = next_li;
       level_bucket *cl = li;
 
-      f_idx = first_index(hv, cl->capacity.load(std::memory_order_seq_cst));
-      s_idx = second_index(partial, f_idx,
-                           cl->capacity.load(std::memory_order_seq_cst));
+      f_idx = first_index(hv, cl->capacity);
+      s_idx = second_index(partial, f_idx, cl->capacity);
 
       bucket &f_b = cl->buckets[f_idx];
       bucket &s_b = cl->buckets[s_idx];
 
       // Flush two buckets simultaneously to reduce the overhead.
-#ifdef NO_CC
-      mfence();
-      f_b.flush_no_fence();
-      s_b.flush_no_fence();
-      mfence();
-#endif
       for (size_type j = 0; j < assoc_num; j++) {
         KV_entry_ptr_s slot = f_b.slots[j];
         if (slot.partial() == partial && slot.addr() != nullptr) {
@@ -684,7 +621,6 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 #endif
       i++;
     } while (li != m->first_level);
-#endif
 
     // Context checking.
     level_meta *tmp_meta;
@@ -714,21 +650,13 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::del_dup(
   if (tmp1_u.partial(true) == tmp2_u.partial(true)) {
     // 1. Refer to the same location
     if (e1 == e2) {
-#ifdef NO_CC
       uint64_t expected = e2.p;
-#else
-      uint64_t expected = e2.p;
-#endif
       p2->p.compare_exchange_strong(expected, 0);
     }
 
     // 2. Refer to different locations with the same contents
     else if (key_equal{}(e1.addr()->first, e2.addr(true)->first)) {
-#ifdef NO_CC
       uint64_t expected = e2.p;
-#else
-      uint64_t expected = e2.p;
-#endif
       bool ret = p2->p.compare_exchange_strong(expected, 0);
       if (ret) {
         delete e2.addr();
@@ -776,10 +704,6 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
       bool found_empty_in_b = false;
       bucket &f_b = cl->buckets[f_idx];
       bucket &s_b = cl->buckets[s_idx];
-      mfence();
-      f_b.flush_no_fence();
-      s_b.flush_no_fence();
-      mfence();
       for (size_type j = 0; j < assoc_num; j++) {
         if (!found_empty_in_b && f_b.slots[j].addr() == nullptr) {
           found_empty_in_b = true;
@@ -843,7 +767,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     level_meta *m = m_copy;
     *e = nullptr;
 
-    level_ptr_s levels[MAX_LEVEL];
+    level_ptr_t levels[MAX_LEVEL];
     difference_type f_idx, s_idx;
     KV_entry_ptr_s f_e, s_e;
     uint64_t slot_idx;
@@ -853,7 +777,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     size_type prev_i;
 
     n_levels = 0;
-    level_ptr_s next_li = m->last_level, li = nullptr;
+    level_ptr_t next_li = m->last_level, li = nullptr;
     do {
       li = next_li;
       levels[n_levels] = li;
@@ -867,7 +791,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     // Bottom-to-top search.
     for (size_type i = 0; i < n_levels; i++) {
       cl = levels[i];
-      uint64_t capacity = cl->capacity.load(std::memory_order_seq_cst);
+      uint64_t capacity = cl->capacity;
       f_idx = first_index(hv, capacity);
       s_idx = second_index(partial, f_idx, capacity);
 
@@ -876,15 +800,8 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
       bool found_empty_in_b = false;
       bucket &f_b = cl->buckets[f_idx];
       bucket &s_b = cl->buckets[s_idx];
-      mfence();
-      f_b.flush_no_fence();
-      s_b.flush_no_fence();
-      mfence();
-
-      bucket_s f_b_s(f_b, true), s_b_s(s_b, true);
-
       for (size_type j = 0; j < assoc_num; j++) {
-        f_e = f_b_s.slots[j];
+        f_e = f_b.slots[j];
         if (f_e.addr() == nullptr) {
           // Since empty slots in top levels are preferred, update
           // vacancy info as long as identical keys are not found.
@@ -961,7 +878,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
 
       found_empty_in_b = false;
       for (size_type j = 0; j < assoc_num; j++) {
-        s_e = s_b_s.slots[j];
+        s_e = s_b.slots[j];
         if (s_e.addr() == nullptr) {
           // Since empty slots in top levels are preferred, update
           // vacancy info as long as identical keys are not found.
@@ -1128,6 +1045,9 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_insert(
     } else if ((result == VACANCY_IN_LEFT || result == VACANCY_IN_RIGHT) &&
                (level_num > 0 || !m->is_resizing)) {
       uint64_t expected = old_e.p;
+#ifdef NO_CC
+      clwb(created.addr(), sizeof(created));
+#endif
       if (e->p.compare_exchange_strong(expected, created.p)) {
 #ifdef OPT_CLEVEL_ROOT_READ
         if (!m->is_resizing && help_update->load_ptr(thread_id)->is_resizing &&
@@ -1186,10 +1106,6 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
 
       bucket &f_b = cl->buckets[f_idx];
       bucket &s_b = cl->buckets[s_idx];
-      mfence();
-      f_b.flush_no_fence();
-      s_b.flush_no_fence();
-      mfence();
       for (size_type j = 0; j < assoc_num; j++) {
         KV_entry_ptr_s tmp(f_b.slots[j]);
         if (tmp.partial(true) == partial && tmp.addr(true) != 0) {
@@ -1307,6 +1223,10 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::generic_update(
   KV_entry_ptr_s created(tmp_entry[t_id]);
   created.set_partial(partial);
 
+#ifdef NO_CC
+  clwb(created.addr(), sizeof(created));
+#endif
+
   bool succ_update = false;
   level_meta *m_copy;
 #ifdef OPT_CLEVEL_ROOT_READ
@@ -1378,25 +1298,37 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
   level_bucket *cl = m_copy->first_level;
 
   if (cl->up.load() == nullptr) {
+#ifdef USE_CXL
+    tmp_level[t_id] = new (cacheable.malloc(sizeof(struct level_bucket))) level_bucket();
+#else
     tmp_level[t_id] = new level_bucket();
+#endif
     size_type new_capacity = cl->capacity * 2;
 #ifdef CLEVEL_DEBUG
     std::cout << "Thread-" << thread_id << " starts expanding for "
               << new_capacity << " buckets" << std::endl;
 #endif
 
-    tmp_level[t_id]->buckets.allocate(new_capacity);
+    tmp_level[t_id]->allocate(new_capacity);
     // tmp_level[t_id]->buckets.flush_elements(new_capacity);
     tmp_level[t_id]->capacity = new_capacity;
     tmp_level[t_id]->up = nullptr;
 
     // Append a new level.
     level_bucket *expected = nullptr;
+#ifdef NO_CC
+    clwb(tmp_level[t_id], sizeof(level_bucket));
+#endif
     bool rc = cl->up.compare_exchange_strong(expected, tmp_level[t_id]);
 
     if (rc == false) {
       // Ohter threads finished expanding
-      tmp_level[t_id]->buckets.free();
+      tmp_level[t_id]->clear();
+#ifdef USE_CXL
+      cacheable.free(tmp_level[t_id]);
+#else
+      delete tmp_level[t_id];
+#endif
     }
 
     // Update the first_level and is_resizing in the metadata.
@@ -1410,6 +1342,10 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
         tmp_meta[t_id] =
             new level_meta(cl->up.load(), m_copy->last_level, true);
       }
+
+#ifdef NO_CC
+    clwb(tmp_meta[t_id], sizeof(level_meta));
+#endif
 
 #ifdef OPT_CLEVEL_ROOT_READ
       if (help_update->cas_ptr(m_copy, tmp_meta[t_id])) {
@@ -1458,6 +1394,9 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
           assert(cl->up != nullptr);
           tmp_meta[t_id] = new level_meta(cl->up, m_copy->last_level, true);
         }
+#ifdef NO_CC
+    clwb(tmp_meta[t_id], sizeof(level_meta));
+#endif
 #ifdef OPT_CLEVEL_ROOT_READ
         if (help_update->cas_ptr(m_copy, tmp_meta[t_id])) {
 #else
@@ -1507,7 +1446,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
 
     size_type n_levels = 1;
     if (m != nullptr) {
-      for (level_bucket *li = m->last_level.load(); li != m->first_level.load();
+      for (level_bucket *li = m->last_level; li != m->first_level;
            li = li->up.load())
         n_levels++;
     }
@@ -1529,7 +1468,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
       level_bucket *tl = m->first_level;
 
       bucket &b = bl->buckets[expand_bucket];
-      b.flush_no_fence();
       for (size_type slot_idx = 0; slot_idx < assoc_num; slot_idx++) {
         KV_entry_ptr_s src_tmp = b.slots[slot_idx];
 
@@ -1580,12 +1518,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
         }
       } // end for (slot_idx)
 
-#ifdef OPT_NO_META
-        // This bucket has been resized, add a mark to show that none of its
-      // value is valid.
-      b.slots[0].p.store(-1);
-#endif
-
       expand_bucket++;
       if (static_cast<size_type>(expand_bucket) == bl->capacity) {
         bool rc = false;
@@ -1598,6 +1530,10 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
           }
           tmp_meta[t_id] =
               new level_meta(m->first_level, bl->up, levels_left != 2);
+
+#ifdef NO_CC
+    clwb(tmp_meta[t_id], sizeof(level_meta));
+#endif
 
 #ifdef OPT_CLEVEL_ROOT_READ
           if (help_update != nullptr && help_update->cas_ptr(m, tmp_meta[t_id])) {

@@ -5,6 +5,7 @@
 #include "core/perf.h"
 #include <cstdint>
 #include <memory>
+#include <atomic>
 
 namespace ycsbc {
 int InsertClient::Task(Operation &op) { return 0; }
@@ -17,16 +18,19 @@ bool InsertClient::DoInsert() {
   bool ret;
 #ifdef INT_YCSBC_KEY
   uint64_t key = workload_->NextSequenceNumKey();
+  memory_fence();
   ret = (db_[get_db(key)]->Insert(key, key) == DB::kOK);
 #elif defined(INT_KEY_ADDR)
   OpGeneratorIntKeyAddr op_gen(workload_);
   uint64_t key = workload_->NextSequenceNumKey();
   void *value = workload_->BuildPrefillValue();
+  memory_fence();
   ret = (db_[get_db(key)]->Insert(key, (uint64_t)value) == DB::kOK);
 #elif defined(YCSB_KEY)
   std::string key = workload_->NextSequenceKey();
   std::vector<DB::KVPair> pairs;
   workload_->BuildValues(pairs);
+  memory_fence();
   ret = (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
           DB::kOK);
 #endif
