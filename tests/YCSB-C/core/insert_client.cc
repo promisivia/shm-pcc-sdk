@@ -11,10 +11,10 @@ namespace ycsbc {
 int InsertClient::Task(Operation &op) { return 0; }
 
 bool InsertClient::DoInsert() {
-  // 统计 load 阶段的 insert 时间
+#ifdef TRX_LATENCY
   TimerAverage timer("insert_load");
   timer.Start();
-  
+#endif
   bool ret;
 #ifdef INT_YCSBC_KEY
   uint64_t key = workload_->NextSequenceNumKey();
@@ -34,8 +34,9 @@ bool InsertClient::DoInsert() {
   ret = (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
           DB::kOK);
 #endif
-  
+#ifdef TRX_LATENCY
   timer.Stop();
+#endif
   return ret;
 }
 
@@ -106,10 +107,6 @@ int InsertClient::TransactionScan(Operation &op, std::atomic<int> &finish, int &
 
 int InsertClient::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
-  // 统计 workload tx 阶段的 update 时间
-  TimerAverage timer_workload("update_workload");
-  timer_workload.Start();
-  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -125,7 +122,6 @@ int InsertClient::TransactionUpdate(Operation &op, std::atomic<int> &finish, int
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
-  timer_workload.Stop();
   return ret;
 }
 
@@ -231,9 +227,6 @@ int InsertClient::TransactionScan(Operation &op) {
 
 int InsertClient::TransactionUpdate(Operation &op) {
   int ret;
-  // 统计 workload tx 阶段的 update 时间
-  TimerAverage timer_workload("update_workload");
-  timer_workload.Start();
   
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
@@ -247,7 +240,6 @@ int InsertClient::TransactionUpdate(Operation &op) {
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
-  timer_workload.Stop();
   return ret;
 }
 

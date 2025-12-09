@@ -103,6 +103,7 @@ public:
   // @start_check_id: 开始检查的线程id
   // @return: 只要返回就说明这一轮的update成功了，返回true说明expected_val没有变，返回false说明expected_val变了
   bool help_update(T* expected_val, uint64_t start_check_id) {
+    // printf("help_update expected: %p, start_check_id: %lu\n", expected_val, start_check_id);
     LockedPointer<T> expected(expected_val);
     for (size_t i = start_check_id; i < replica_num_; ++i) {
       T* cur_global_ptr = global_ptr_->load();
@@ -128,9 +129,8 @@ public:
     // 先尝试将全局指针设置为带锁位的值
     T* cur_global = global_ptr_->load();
     T* expected_global = cur_global;
-    if (global_ptr_->compare_exchange_strong(expected_global, expected.with_lock())) {
+    if (global_ptr_->compare_exchange_strong(cur_global, expected)) {
       // 成功设置锁位，现在清除锁位
-      help_update(expected_val, 0);
       return true;
     }
     // CAS失败，检查是否已经是期望值（清除锁位后）
@@ -155,10 +155,12 @@ public:
     T* expected = old_val;
     LockedPointer<T> new_ptr(new_val);
     if (!global_ptr_->compare_exchange_strong(expected, new_ptr.with_lock())) {
+      // printf("cas_ptr failed: %p -> %p\n", old_val, new_val);
       return false;
     }
 
     help_update(new_val, 0);
+    printf("cas_ptr success: %p -> %p\n", old_val, new_val);
     return true;
   }
 
@@ -171,12 +173,17 @@ public:
     T* local_r = (*replica_ptrs_)[thread_id].load();
 
     if (!LockedPointer<T>::has_lock(local_r)) {
+      // printf("load_ptr: %p\n", local_r);
       return local_r;
     }
 
+    // printf("load_ptr: %p\n", local_r);
+
     T* cleared_val = LockedPointer<T>::clear_lock(local_r);
     help_update(cleared_val, thread_id + 1);
+    // printf("load_ptr cas old: %p, new: %p\n", local_r, cleared_val);
     current_cas((*replica_ptrs_)[thread_id], local_r, cleared_val);
+    // printf("load_ptr success: %p, %p\n", cleared_val, (*replica_ptrs_)[thread_id]);
     return cleared_val;
   }
 };

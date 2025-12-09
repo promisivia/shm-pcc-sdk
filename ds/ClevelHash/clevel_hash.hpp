@@ -571,6 +571,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
 
 
 #ifdef OPT_CLEVEL_ROOT_READ
+  // printf("worker_thread_id = %zu\n", SimThreadInfo::worker_thread_id);
   level_meta *m = help_update->load_ptr(SimThreadInfo::worker_thread_id);
 #else
   level_meta *m = meta.load();
@@ -615,7 +616,12 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
         }
       }
 
-      next_li = cl->up;
+      if (m->is_resizing) {
+        next_li = cl->up;
+      } else {
+        next_li = m->first_level;
+      }
+
 #ifdef CLEVEL_DOUBLE_READ_COUNT
       next_level_count->Increment();
 #endif
@@ -688,7 +694,12 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
       li = next_li;
       levels[n_levels] = li;
       n_levels++;
-      next_li = li->up;
+
+      if (m->is_resizing) {
+        next_li = li->up;
+      } else {
+        next_li = m->first_level;
+      }
     } while (li != m->first_level);
 
     level_bucket *cl;
@@ -782,7 +793,11 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
       li = next_li;
       levels[n_levels] = li;
       n_levels++;
-      next_li = li->up;
+      if (m->is_resizing) {
+        next_li = li->up;
+      } else {
+        next_li = m->first_level;
+      }
     } while (li != m->first_level);
 
     level_bucket *cl;
@@ -1190,7 +1205,11 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
           }
         }
       }
-      next_li = cl->up;
+      if (m->is_resizing) {
+        next_li = cl->up;
+      } else {
+        next_li = m->first_level;
+      }
       i++;
     } while (li != m->first_level);
 

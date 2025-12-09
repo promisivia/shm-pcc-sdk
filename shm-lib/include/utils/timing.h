@@ -388,12 +388,6 @@ class TimerAverage : public TimerInterface {
       double avg_time = static_cast<double>(time) / count;
       os << "Average time for " << name << ": " << avg_time << " ns" << std::endl;
       os << "Total count for " << name << ": " << count << std::endl;
-      // 特别处理 insert_load 统计，打印延迟信息
-      if (name == "insert_load") {
-        os << "Insert latency (load phase): " << avg_time << " ns ("
-           << avg_time / 1000.0 << " us, " << avg_time / 1000000.0 << " ms)"
-           << std::endl;
-      }
     } else {
       std::cout << "No measurements taken for " << name << std::endl;
     }
@@ -577,43 +571,11 @@ extern void InitStatistics();
 extern void PrintStatistics();
 
 /*
- * Insert/Update 时间统计辅助函数
- * insert 统计用于 load 阶段的 insert/update 操作
- * update 统计用于 workload tx 运行时的 update 操作
+ * Latency 时间统计辅助函数
  */
-
-// 初始化 insert 和 update 的时间统计
-inline void InitInsertUpdateStatistics() {
-  TimerAverage::AddNewEntry("insert_load");
-  TimerDetailed::AddNewEntry("insert_load");
-  TimerAverage::AddNewEntry("update_workload");
-  TimerDetailed::AddNewEntry("update_workload");
+inline void InitLatencyStatistics() {
+  TimerAverage::AddNewEntry("read_latency");
+  TimerAverage::AddNewEntry("update_latency");
+  TimerAverage::AddNewEntry("insert_latency");
 }
-
-// 打印 insert 统计信息（load 阶段）
-inline void PrintInsertStatistics(std::ostream& os = std::cout) {
-  os << "========== Insert Statistics (Load Phase) ==========" << std::endl;
-  TimerAverage::Print("insert_load", os);
-  os << std::endl;
-  os << "Insert Histogram (Load Phase):" << std::endl;
-  TimerDetailed::PrintHistogram("insert_load", 10, 50);
-  os << std::endl;
-}
-
-// 打印 update 统计信息（workload tx 阶段）
-inline void PrintUpdateStatistics(std::ostream& os = std::cout) {
-  os << "========== Update Statistics (Workload TX) ==========" << std::endl;
-  TimerAverage::Print("update_workload", os);
-  os << std::endl;
-  os << "Update Histogram (Workload TX):" << std::endl;
-  TimerDetailed::PrintHistogram("update_workload", 10, 50);
-  os << std::endl;
-}
-
-// 打印所有 insert/update 统计信息
-inline void PrintInsertUpdateStatistics(std::ostream& os = std::cout) {
-  PrintInsertStatistics(os);
-  PrintUpdateStatistics(os);
-}
-
 #endif  // TIMING_H
