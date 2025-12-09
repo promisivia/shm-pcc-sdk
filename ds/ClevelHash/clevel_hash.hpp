@@ -281,6 +281,7 @@ public:
     struct bucket *buckets;
     uint64_t capacity;
     atomic_type<level_ptr_t> up;
+    // std::atomic<level_ptr_t> up;
 
     level_bucket() : buckets(nullptr), capacity(0), up(nullptr) {}
 
@@ -305,18 +306,69 @@ public:
     level_ptr_t first_level;
     level_ptr_t last_level;
     char is_resizing;
+#ifdef OPT_CLEVEL_ROOT_READ
+    int level_count;
+    level_ptr_t levels[MAX_LEVEL];
+#endif
 
     level_meta() {
       first_level = nullptr;
       last_level = nullptr;
       is_resizing = false;
+#ifdef OPT_CLEVEL_ROOT_READ
+      level_count = 0;
+      for (int i = 0; i < MAX_LEVEL; i++) {
+        levels[i] = nullptr;
+      }
+#endif
     }
 
     level_meta(const level_ptr_t &fl, const level_ptr_t &ll, bool flag) {
       first_level = fl;
       last_level = ll;
       is_resizing = flag;
+#ifdef OPT_CLEVEL_ROOT_READ
+      set_levels();
+#endif
     }
+
+#ifdef OPT_CLEVEL_ROOT_READ
+    void set_levels() {
+      level_ptr_t l = last_level;
+      int i = 0;
+      
+      // 边界检查：确保不超过MAX_LEVEL
+      // 从last_level开始，沿着up指针遍历到first_level
+      while (l != first_level && i < MAX_LEVEL - 1) {
+        levels[i] = l;
+        // 使用load()因为up是atomic_type（可能是std::atomic或nt<T>）
+        level_ptr_t next = l->up.load();
+        if (next == nullptr) {
+          // 如果up是nullptr，说明l就是first_level（first_level->up == nullptr）
+          // 这种情况不应该发生，因为循环条件是 l != first_level
+          // 但为了安全，还是检查一下
+          break;
+        }
+        l = next;
+        i++;
+      }
+      
+      // 确保first_level也被放入数组（如果还没有的话）
+      if (l == first_level && i < MAX_LEVEL) {
+        // 如果循环正常结束（l == first_level），将first_level放入数组
+        levels[i] = first_level;
+        level_count = i + 1;
+      } else if (i < MAX_LEVEL) {
+        // 如果因为其他原因退出（比如达到MAX_LEVEL），也要确保first_level在数组中
+        levels[i] = first_level;
+        level_count = i + 1;
+      } else {
+        // 如果超过MAX_LEVEL，至少保证first_level在数组末尾
+        levels[MAX_LEVEL - 1] = first_level;
+        level_count = MAX_LEVEL;
+      }
+    }
+#endif
   };
 
   static partial_t get_partial(hv_type hv) {
@@ -444,12 +496,18 @@ public:
 
     uint64_t total_slots = 0;
     level_ptr_t li;
+#ifdef OPT_CLEVEL_ROOT_READ
+    for (int i = 0; i < m->level_count; i++) {
+      li = m->levels[i];
+      total_slots += li->capacity * assoc_num;
+    }
+#else
     for (li = m->last_level; li != m->first_level;) {
       total_slots += li->capacity * assoc_num;
       li = li->up;
     }
     total_slots += li->capacity * assoc_num;
-
+#endif
     return total_slots;
   }
 
@@ -580,7 +638,12 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
   while (true) {
   RETRY_READ:
     // Bottom-to-top search.
+#ifdef OPT_CLEVEL_ROOT_READ
+    int level_idx = 0;
+    level_bucket *li = nullptr, *next_li = m->levels[level_idx];
+#else
     level_bucket *li = nullptr, *next_li = m->last_level;
+#endif
 
     difference_type f_idx, s_idx;
     size_type i = 0;
@@ -616,11 +679,16 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::search(
         }
       }
 
-      if (m->is_resizing) {
-        next_li = cl->up;
-      } else {
-        next_li = m->first_level;
+#ifdef OPT_CLEVEL_ROOT_READ
+      level_idx++;
+      if (level_idx >= m->level_count) {
+        break;
       }
+      next_li = m->levels[level_idx];
+      assert(next_li != nullptr);
+#else
+      next_li = cl->up;
+#endif
 
 #ifdef CLEVEL_DOUBLE_READ_COUNT
       next_level_count->Increment();
@@ -688,19 +756,21 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find_empty_slot(
 
     f_code_t result;
 
+#ifdef OPT_CLEVEL_ROOT_READ
+    n_levels = m->level_count;
+    for (size_type i = 0; i < n_levels && i < MAX_LEVEL; i++) {
+      levels[i] = m->levels[i];
+    }
+#else
     n_levels = 0;
     level_bucket *li = nullptr, *next_li = m->last_level;
     do {
       li = next_li;
       levels[n_levels] = li;
       n_levels++;
-
-      if (m->is_resizing) {
-        next_li = li->up;
-      } else {
-        next_li = m->first_level;
-      }
+      next_li = li->up;
     } while (li != m->first_level);
+#endif
 
     level_bucket *cl;
     result = ABSENT_AND_NO_VACANCY;
@@ -787,19 +857,21 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::find(
     KV_entry_ptr_s prev_e;
     size_type prev_i;
 
+#ifdef OPT_CLEVEL_ROOT_READ
+    n_levels = m->level_count;
+    for (size_type i = 0; i < n_levels && i < MAX_LEVEL; i++) {
+      levels[i] = m->levels[i];
+    }
+#else
     n_levels = 0;
     level_ptr_t next_li = m->last_level, li = nullptr;
     do {
       li = next_li;
       levels[n_levels] = li;
       n_levels++;
-      if (m->is_resizing) {
-        next_li = li->up;
-      } else {
-        next_li = m->first_level;
-      }
+      next_li = li->up;
     } while (li != m->first_level);
-
+#endif
     level_bucket *cl;
     result = ABSENT_AND_NO_VACANCY;
 
@@ -1205,11 +1277,7 @@ clevel_hash<Key, T, Hash, KeyEqual, HashPower>::erase(const key_type &key,
           }
         }
       }
-      if (m->is_resizing) {
-        next_li = cl->up;
-      } else {
-        next_li = m->first_level;
-      }
+      next_li = cl->up;
       i++;
     } while (li != m->first_level);
 
