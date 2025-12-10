@@ -1456,7 +1456,12 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
         if (cl->capacity >= new_capacity && m_copy->is_resizing) {
           // CAS fails because other threads help updating
           // meta
+          tmp_meta[t_id]->clear();
+#ifdef USE_CXL
+          cacheable.free(tmp_meta[t_id]);
+#else
           delete tmp_meta[t_id];
+#endif
           break;
         }
         // CAS fails because other threads complete rehashing.
@@ -1506,7 +1511,12 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
           if (cl->capacity >= new_capacity && m_copy->is_resizing) {
             // CAS fails because other threads help
             // updating meta
+            tmp_meta[t_id]->clear();
+#ifdef USE_CXL
+            cacheable.free(tmp_meta[t_id]);
+#else
             delete tmp_meta[t_id];
+#endif
             break;
           }
           // CAS fails because other threads complete
@@ -1637,7 +1647,12 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
             expand_bucket = 0;
             break;
           } else {
+            tmp_meta[t_id]->clear();
+#ifdef USE_CXL
+            cacheable.free(tmp_meta[t_id]);
+#else
             delete tmp_meta[t_id];
+#endif
 #ifdef OPT_CLEVEL_ROOT_READ
             m = help_update->load_ptr(SimThreadInfo::worker_thread_id);
 #else
