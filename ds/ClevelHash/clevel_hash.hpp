@@ -66,7 +66,7 @@ struct hash64shift {
 };
 
 template <typename Key, typename T, typename Hash = std::hash<Key>,
-          typename KeyEqual = std::equal_to<Key>, size_t HashPower = 24>
+          typename KeyEqual = std::equal_to<Key>, size_t HashPower = 20>
 class clevel_hash {
 public:
   using key_type = Key;
@@ -288,6 +288,10 @@ public:
     void allocate(uint64_t capacity) {
 #ifdef USE_CXL
       this->buckets = new (cacheable.malloc(capacity * sizeof(bucket))) bucket[capacity];
+      if (this->buckets == nullptr) {
+        printf("Failed to allocate memory for level_bucket, size=%lu\n", capacity);
+        exit(1);
+      }
 #else
       this->buckets = new bucket[capacity];
 #endif
@@ -374,7 +378,11 @@ public:
     return (partial_t)((uint64_t)hv >> shift_bits);
   }
 
+#ifdef USE_CXL
+  clevel_hash() : meta(new (cacheable.malloc(sizeof(level_meta))) level_meta()), thread_num(0) {
+#else
   clevel_hash() : meta(new level_meta()), thread_num(0) {
+#endif
     std::cout << "clevel_hash constructor: HashPower = " << HashPower
               << std::endl;
 
@@ -393,14 +401,22 @@ public:
     level_bucket *tmp;
     size_t capacity;
 
+#ifdef USE_CXL
+    tmp = new (cacheable.malloc(sizeof(level_bucket))) level_bucket();
+#else
     tmp = new level_bucket();
+#endif
     capacity = 1 << hashpower;
     tmp->allocate(capacity);
     tmp->capacity = capacity;
     tmp->up = nullptr;
     m->first_level = tmp;
 
+#ifdef USE_CXL
+    tmp = new (cacheable.malloc(sizeof(level_bucket))) level_bucket();
+#else
     tmp = new level_bucket();
+#endif
     capacity = 1 << (hashpower - 1);
     tmp->allocate(capacity);
     tmp->capacity = capacity;
@@ -1384,6 +1400,10 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
   if (cl->up.load() == nullptr) {
 #ifdef USE_CXL
     tmp_level[t_id] = new (cacheable.malloc(sizeof(struct level_bucket))) level_bucket();
+    if (tmp_level[t_id] == nullptr) {
+      printf("Thread-%lu: Failed to allocate memory for level_bucket\n", thread_id);
+      exit(1);
+    }
 #else
     tmp_level[t_id] = new level_bucket();
 #endif
@@ -1415,16 +1435,26 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
     }
 
+    tmp_level[t_id]->allocate(new_capacity);
+
     // Update the first_level and is_resizing in the metadata.
     while (true) {
       if (cl->capacity >= new_capacity) {
         // Help updating meta
+#ifdef USE_CXL
         tmp_meta[t_id] =
-            new level_meta(m_copy->first_level, m_copy->last_level, true);
+            new (cacheable.malloc(sizeof(level_meta))) level_meta(m_copy->first_level, m_copy->last_level, true);
+#else
+        tmp_meta[t_id] = new level_meta(m_copy->first_level, m_copy->last_level, true);
+#endif
       } else {
+#ifdef USE_CXL
         assert(cl->up.load() != nullptr);
         tmp_meta[t_id] =
-            new level_meta(cl->up.load(), m_copy->last_level, true);
+            new (cacheable.malloc(sizeof(level_meta))) level_meta(cl->up.load(), m_copy->last_level, true);
+#else
+        tmp_meta[t_id] = new level_meta(cl->up.load(), m_copy->last_level, true);
+#endif
       }
 
 #ifdef NO_CC
@@ -1479,11 +1509,19 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
       while (true) {
         // Help updating meta
         if (cl->capacity >= new_capacity) {
+#ifdef USE_CXL  
           tmp_meta[t_id] =
-              new level_meta(m_copy->first_level, m_copy->last_level, true);
+              new (cacheable.malloc(sizeof(level_meta))) level_meta(m_copy->first_level, m_copy->last_level, true);
+#else
+        tmp_meta[t_id] = new level_meta(m_copy->first_level, m_copy->last_level, true);
+#endif
         } else {
           assert(cl->up != nullptr);
+#ifdef USE_CXL
+          tmp_meta[t_id] = new (cacheable.malloc(sizeof(level_meta))) level_meta(cl->up, m_copy->last_level, true);
+#else
           tmp_meta[t_id] = new level_meta(cl->up, m_copy->last_level, true);
+#endif
         }
 #ifdef NO_CC
     clwb(tmp_meta[t_id], sizeof(level_meta));
@@ -1623,8 +1661,11 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
             levels_left++;
             li = li->up;
           }
-          tmp_meta[t_id] =
-              new level_meta(m->first_level, bl->up, levels_left != 2);
+#ifdef USE_CXL
+          tmp_meta[t_id] = new (cacheable.malloc(sizeof(level_meta))) level_meta(m->first_level, bl->up, levels_left != 2);
+#else
+          tmp_meta[t_id] = new level_meta(m->first_level, bl->up, levels_left != 2);
+#endif
 
 #ifdef NO_CC
     clwb(tmp_meta[t_id], sizeof(level_meta));
