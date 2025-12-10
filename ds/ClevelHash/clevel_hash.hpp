@@ -66,7 +66,7 @@ struct hash64shift {
 };
 
 template <typename Key, typename T, typename Hash = std::hash<Key>,
-          typename KeyEqual = std::equal_to<Key>, size_t HashPower = 14>
+          typename KeyEqual = std::equal_to<Key>, size_t HashPower = 24>
 class clevel_hash {
 public:
   using key_type = Key;
@@ -336,17 +336,12 @@ public:
     void set_levels() {
       level_ptr_t l = last_level;
       int i = 0;
-      
-      // 边界检查：确保不超过MAX_LEVEL
-      // 从last_level开始，沿着up指针遍历到first_level
+      // printf("set_levels: first_level = %p, last_level = %p\n", first_level, last_level);
       while (l != first_level && i < MAX_LEVEL - 1) {
+        // printf("set_levels: i = %d, l = %p, l->capacity = %lu\n", i, l, l->capacity);
         levels[i] = l;
-        // 使用load()因为up是atomic_type（可能是std::atomic或nt<T>）
         level_ptr_t next = l->up.load();
         if (next == nullptr) {
-          // 如果up是nullptr，说明l就是first_level（first_level->up == nullptr）
-          // 这种情况不应该发生，因为循环条件是 l != first_level
-          // 但为了安全，还是检查一下
           break;
         }
         l = next;
@@ -357,10 +352,12 @@ public:
       if (l == first_level && i < MAX_LEVEL) {
         // 如果循环正常结束（l == first_level），将first_level放入数组
         levels[i] = first_level;
+        // printf("set_levels: i = %d, l = %p, l->capacity = %lu\n", i, l, l->capacity);
         level_count = i + 1;
       } else if (i < MAX_LEVEL) {
         // 如果因为其他原因退出（比如达到MAX_LEVEL），也要确保first_level在数组中
         levels[i] = first_level;
+        // printf("set_levels: i = %d, l = %p, l->capacity = %lu\n", i, l, l->capacity);
         level_count = i + 1;
       } else {
         // 如果超过MAX_LEVEL，至少保证first_level在数组末尾
@@ -1447,7 +1444,10 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
         break;
       } else {
 #ifdef OPT_CLEVEL_ROOT_READ
-        m_copy = help_update->load_ptr(thread_id);
+        // printf("expand: help_update->load_ptr(thread_id) = %p [tid=%lu]\n", help_update->load_ptr(thread_id), thread_id);
+        m_copy = help_update->load_ptr(t_id);
+        // printf("expand: m_copy = %p [tid=%lu]\n", m_copy, thread_id);
+        // m_copy = meta.load();
 #else
         m_copy = meta.load();
 #endif
@@ -1520,7 +1520,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 template <typename Key, typename T, typename Hash, typename KeyEqual,
           size_t HashPower>
 void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
-  size_type thread_id = thread_num - 1;
+  size_type thread_id = SimThreadInfo::worker_thread_count - 1;
   difference_type t_id = static_cast<difference_type>(thread_id);
   difference_type expand_bucket = 0;
 

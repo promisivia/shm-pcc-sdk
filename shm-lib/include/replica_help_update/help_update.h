@@ -96,6 +96,7 @@ public:
           printf("HelpUpdate constructor\n");
           printf("global_ptr: %p\n", global_ptr_);
           printf("replica_ptrs: %p\n", replica_ptrs_);
+          printf("replica_num: %lu\n", replica_num_);
         }
 
   // 更新所有副本一轮
@@ -104,6 +105,7 @@ public:
   // @return: 只要返回就说明这一轮的update成功了，返回true说明expected_val没有变，返回false说明expected_val变了
   bool help_update(T* expected_val, uint64_t start_check_id) {
     // printf("help_update expected: %p, start_check_id: %lu\n", expected_val, start_check_id);
+    assert(start_check_id < replica_num_);
     LockedPointer<T> expected(expected_val);
     for (size_t i = start_check_id; i < replica_num_; ++i) {
       T* cur_global_ptr = global_ptr_->load();
@@ -170,17 +172,19 @@ public:
   // (2) 如果R[i]以.1结尾，帮助更新R[i+1]到R[N]为A.1
   // 返回正确的ptr（清除锁位）
   T* load_ptr(size_t thread_id) {
+    assert(thread_id < replica_num_);
     T* local_r = (*replica_ptrs_)[thread_id].load();
 
     if (!LockedPointer<T>::has_lock(local_r)) {
-      // printf("load_ptr: %p\n", local_r);
       return local_r;
     }
 
     // printf("load_ptr: %p\n", local_r);
 
     T* cleared_val = LockedPointer<T>::clear_lock(local_r);
-    help_update(cleared_val, thread_id + 1);
+    if (thread_id + 1 < replica_num_) {
+      help_update(cleared_val, thread_id + 1);
+    }
     // printf("load_ptr cas old: %p, new: %p\n", local_r, cleared_val);
     current_cas((*replica_ptrs_)[thread_id], local_r, cleared_val);
     // printf("load_ptr success: %p, %p\n", cleared_val, (*replica_ptrs_)[thread_id]);
