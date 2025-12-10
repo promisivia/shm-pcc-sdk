@@ -256,6 +256,7 @@ enum ALLOC_TYPE {
   UNCACHED_MEM_TEST = 0,
   ALLOC_NUMA_TEST = 1,
   MMAP_NUMA_TEST = 2,
+  MMAP_DEVICE_TEST = 3,
   INVALID_ALLOC_TYPE,
 };
 
@@ -307,6 +308,55 @@ void *allocate_memory(size_t size) {
                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     }
     break;
+  case MMAP_DEVICE_TEST: {
+    int fd = open(dev_name, O_RDWR);
+    if (fd == -1) {
+      perror("Failed to open device");
+      exit(1);
+    }
+    
+    // 尝试获取设备大小（对于字符设备可能失败，但不影响 mmap）
+    off_t device_size = lseek(fd, 0, SEEK_END);
+    if (device_size > 0 && (size_t)device_size < size) {
+      fprintf(stderr, "Warning: Device size (%ld) is smaller than requested size (%zu). Using device size.\n", 
+              device_size, size);
+      size = device_size;
+    }
+    lseek(fd, 0, SEEK_SET); // 重置文件指针
+    
+    // DAX 设备通常需要 2MB 对齐，尝试使用更大的对齐
+    const size_t dax_align = 2 * 1024 * 1024; // 2MB
+    
+    // 确保 size 至少是 2MB 对齐的（对于 DAX 设备）
+    if (size < dax_align) {
+      size = dax_align;
+    } else {
+      size = (size + dax_align - 1) & ~(dax_align - 1);
+    }
+    
+    // 尝试使用 MAP_SYNC（如果支持的话，用于 DAX 设备）
+    int mmap_flags = MAP_SHARED;
+#ifdef MAP_SYNC
+    mmap_flags |= MAP_SYNC;
+#endif
+    
+    addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
+    if (addr == MAP_FAILED) {
+      // 如果 MAP_SYNC 失败，尝试不使用它
+      if (mmap_flags & MAP_SYNC) {
+        mmap_flags &= ~MAP_SYNC;
+        addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
+      }
+      if (addr == MAP_FAILED) {
+        perror("mmap device failed");
+        fprintf(stderr, "Attempted to mmap %zu bytes from device %s\n", size, dev_name);
+        close(fd);
+        exit(1);
+      }
+    }
+    close(fd); // mmap 后可以关闭文件描述符
+    break;
+  }
   default:
     fprintf(stderr, "Unknown memory allocation method: %d\n", alloc_type);
     exit(1);
@@ -627,7 +677,7 @@ void para_read_test() {
     double max_time = *max_element(times.begin(), times.end());
     // std::cout << "Max time: " << max_time << "ns" << "Average time: " << average_time << "ns" << std::endl;
     double thoughput = (double)(thread_num * total_rept) / (double)(max_time);
-    double average_throughput = (double)(thread_num * total_rept) / (double)(average_time);
+    // double average_throughput = (double)(thread_num * total_rept) / (double)(average_time);
     std::cout << "Average throughput: " << thoughput << "ops/s" << std::endl;
     // std::cout << "Average throughput: " << average_throughput << "ops/s" << std::endl;
   }
@@ -823,6 +873,51 @@ void bank_read_test() {
   }
 }
 
+void clflush_4kb_test(size_t tsize) {
+  const size_t test_size = 4096; // 4KB
+  const size_t num_tests = 4096; // 4096 个测试
+  void *mem = allocate_memory(test_size);
+  
+  // 初始化内存
+  memset(mem, 0xAA, test_size);
+  
+  // 存储每次测试的时延（纳秒）
+  std::vector<double> latencies;
+  latencies.reserve(num_tests);
+  
+  struct timespec ts_begin, ts_end;
+  
+  // 外层循环：4096 个测试
+  for (size_t i = 0; i < num_tests; ++i) {
+    // 每次测试：记录开始时间 -> 执行一次 clflush -> 记录结束时间
+    clock_gettime(CLOCK_MONOTONIC, &ts_begin);
+    // clflush_cache_range(mem, test_size);
+    clflush(mem, test_size, true);
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    
+    // 计算单次时延（纳秒）
+    double elapsed = get_elapsed_time(ts_begin, ts_end);
+    double latency_ns = elapsed * 1e9; // 转换为纳秒
+    latencies.push_back(latency_ns);
+  }
+  
+  // 计算平均时延
+  double total_latency = 0.0;
+  for (double lat : latencies) {
+    total_latency += lat;
+  }
+  double avg_time_per_op = total_latency / num_tests; // 平均每次操作的时延（纳秒）
+  double avg_time_per_byte = avg_time_per_op / test_size; // 每字节的开销（纳秒）
+  
+  // 计算总时间
+  double total_elapsed = total_latency / 1e9; // 转换为秒
+  
+  printf("clflush+mfence 4KB test: %fsec, %fns/op, %fns/byte\n", 
+         total_elapsed, avg_time_per_op, avg_time_per_byte);
+  printf("Total operations: %zu, Total bytes flushed: %zu MB\n", 
+         num_tests, (num_tests * test_size) / (1024 * 1024));
+}
+
 void usage(int ac, char **av) {
   printf("Usage: %s <cache_type> <alloc_type> [alloc_option] <test_name>\n",
          av[0]);
@@ -834,9 +929,10 @@ void usage(int ac, char **av) {
   printf("  uncached_mem [device_name]   (default: %s)\n", dev_name);
   printf("  alloc_numa [numa_node]       (default: %d)\n", ram_numa_node);
   printf("  mmap_numa [numa_node]        (default: %d)\n", ram_numa_node);
+  printf("  mmap_device <device_name>    (required: device file path)\n");
   printf("\nTest Names:\n");
   printf("  read_miss, read_hit, write, cas_miss, cas_hit, store_miss, "
-         "store_hit, nt_cas, para_read, para_write, bank_read");
+         "store_hit, nt_cas, para_read, para_write, bank_read, clflush_4kb");
 #ifdef USE_DISAGR_CAS
   printf(",\n  nt_cas_load, disagr_cas_load, disagr_cas_store, disagr_cas");
 #endif
@@ -872,6 +968,8 @@ int parse_argument(int argc, char **argv) {
     alloc_type = ALLOC_NUMA_TEST;
   } else if (!strcmp(current_alloc_type_str, "mmap_numa")) {
     alloc_type = MMAP_NUMA_TEST;
+  } else if (!strcmp(current_alloc_type_str, "mmap_device")) {
+    alloc_type = MMAP_DEVICE_TEST;
   } else {
     printf("Invalid alloc_type: %s\n", argv[2]);
     usage(argc, argv);
@@ -897,6 +995,14 @@ int parse_argument(int argc, char **argv) {
       ram_numa_node = atoi(argv[3]); // User-provided NUMA node
       test_name_index = 4;
     }
+    break;
+  case MMAP_DEVICE_TEST:
+    if (argc < 5) { // mmap_device requires: prog cache mmap_device device_name test_name
+      printf("mmap_device requires device_name argument.\n");
+      usage(argc, argv);
+    }
+    dev_name = argv[3];
+    test_name_index = 4;
     break;
   default:
     printf("Invalid alloc_type: %s\n", argv[2]);
@@ -926,7 +1032,7 @@ int main(int ac, char **av) {
   printf("Configuration:\n");
   printf("  Cache Type: %s\n", av[1]);
   printf("  Alloc Type: %s\n", av[2]);
-  if (alloc_type == UNCACHED_MEM_TEST) {
+  if (alloc_type == UNCACHED_MEM_TEST || alloc_type == MMAP_DEVICE_TEST) {
     printf("  Device Name: %s\n", dev_name);
   } else if (alloc_type == ALLOC_NUMA_TEST || alloc_type == MMAP_NUMA_TEST) {
     printf("  NUMA Node: %d\n", ram_numa_node);
@@ -947,6 +1053,7 @@ int main(int ac, char **av) {
       {"store_miss", {store_miss_test, nullptr}},
       {"store_hit", {store_hit_test, nullptr}},
       {"nt_cas", {nt_cas_test, nullptr}},
+      {"clflush_4kb", {clflush_4kb_test, nullptr}},
 #ifdef USE_DISAGR_CAS
       {"nt_cas_load", {nt_cas_load_test, nullptr}},
       {"disagr_cas_load", {disagr_cas_load_test, nullptr}},
