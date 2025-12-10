@@ -1413,7 +1413,8 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
               << new_capacity << " buckets" << std::endl;
 #endif
 
-    tmp_level[t_id]->allocate(new_capacity);
+    /* delay malloc until the CAS succeeds */
+    // tmp_level[t_id]->allocate(new_capacity);
     // tmp_level[t_id]->buckets.flush_elements(new_capacity);
     tmp_level[t_id]->capacity = new_capacity;
     tmp_level[t_id]->up = nullptr;
@@ -1466,11 +1467,11 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #else
       if (meta.compare_exchange_strong(m_copy, tmp_meta[t_id])) {
 #endif
-#ifdef CLEVEL_DEBUG
+// #ifdef CLEVEL_DEBUG
         std::cout << "Thread-" << thread_id
                   << " finishes expanding, capacity: " << capacity()
                   << std::endl;
-#endif
+// #endif
         break;
       } else {
 #ifdef OPT_CLEVEL_ROOT_READ
@@ -1645,7 +1646,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
         } // end for
 
         if (!succ) {
-          std::cout << "expand during resizing!" << std::endl;
+          // std::cout << "expand during resizing!" << std::endl;
           expand(thread_id, m);
           goto RETRY_REHASH;
         }

@@ -128,21 +128,12 @@ public:
       }
     }
 
-    // 先尝试将全局指针设置为带锁位的值
-    T* cur_global = global_ptr_->load();
-    T* expected_global = cur_global;
-    if (global_ptr_->compare_exchange_strong(cur_global, expected)) {
+    // 尝试将全局指针设置为带锁位的值
+    if (global_ptr_->compare_exchange_strong(expected.with_lock(), expected)) {
       // 成功设置锁位，现在清除锁位
       return true;
     }
-    // CAS失败，检查是否已经是期望值（清除锁位后）
-    cur_global = global_ptr_->load();
-    LockedPointer<T> final_global = LockedPointer<T>::from_locked(cur_global);
-    if (final_global == expected && !LockedPointer<T>::has_lock(cur_global)) {
-      return true;
-    }
-
-    return false;
+    return true;
   }
 
   // 更新全局指针
@@ -162,7 +153,7 @@ public:
     }
 
     help_update(new_val, 0);
-    printf("cas_ptr success: %p -> %p\n", old_val, new_val);
+    // printf("cas_ptr success: %p -> %p\n", old_val, new_val);
     return true;
   }
 
