@@ -1456,7 +1456,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
         if (cl->capacity >= new_capacity && m_copy->is_resizing) {
           // CAS fails because other threads help updating
           // meta
-          tmp_meta[t_id]->clear();
 #ifdef USE_CXL
           cacheable.free(tmp_meta[t_id]);
 #else
@@ -1511,7 +1510,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
           if (cl->capacity >= new_capacity && m_copy->is_resizing) {
             // CAS fails because other threads help
             // updating meta
-            tmp_meta[t_id]->clear();
 #ifdef USE_CXL
             cacheable.free(tmp_meta[t_id]);
 #else
@@ -1647,7 +1645,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::resize() {
             expand_bucket = 0;
             break;
           } else {
-            tmp_meta[t_id]->clear();
 #ifdef USE_CXL
             cacheable.free(tmp_meta[t_id]);
 #else
