@@ -102,9 +102,14 @@ public:
   // using KV_entry_ptr_t = nt_pointer<value_type>;
 
   using level_ptr_t = level_bucket *;
-  using level_meta_ptr_t = nt_pointer<level_meta>;
 
-  constexpr static size_type assoc_num = 2;
+  #ifdef NO_CC
+  using level_meta_ptr_t = nt_pointer<level_meta>;
+  #else
+  using level_meta_ptr_t = std::atomic<level_meta *>;
+  #endif
+
+  constexpr static size_type assoc_num = 4;
   constexpr static size_type resize_bulk = 1;
 
   constexpr static size_type partial_ext_bits =
@@ -428,7 +433,7 @@ public:
     run_expand_thread.store(true);
     expand_thread = std::thread(&clevel_hash::resize, this);
 
-    KV_entry_ptr_s e = get_entry(meta->first_level, 0, 0);
+    KV_entry_ptr_s e = get_entry(meta.load()->first_level, 0, 0);
     if (e.addr() != nullptr) {
       // never fires.
       get_key(e);
@@ -499,7 +504,7 @@ public:
     std::cout << "sizeof(meta) = " << sizeof(meta) << std::endl;
   }
 
-  uint64_t capacity() const { return capacity(meta); }
+  uint64_t capacity() const { return capacity(meta.load()); }
 
   /**
    * Get the total capacity (#buckets * assoc_num) of given context.
@@ -1414,8 +1419,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
 #endif
 
     /* delay malloc until the CAS succeeds */
-    // tmp_level[t_id]->allocate(new_capacity);
-    // tmp_level[t_id]->buckets.flush_elements(new_capacity);
+    tmp_level[t_id]->allocate(new_capacity);
     tmp_level[t_id]->capacity = new_capacity;
     tmp_level[t_id]->up = nullptr;
 
@@ -1435,8 +1439,6 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
       delete tmp_level[t_id];
 #endif
     }
-
-    tmp_level[t_id]->allocate(new_capacity);
 
     // Update the first_level and is_resizing in the metadata.
     while (true) {
@@ -1459,7 +1461,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
       }
 
 #ifdef NO_CC
-    clwb(tmp_meta[t_id], sizeof(level_meta));
+      clwb(tmp_meta[t_id], sizeof(level_meta));
 #endif
 
 #ifdef OPT_CLEVEL_ROOT_READ
@@ -1475,10 +1477,7 @@ void clevel_hash<Key, T, Hash, KeyEqual, HashPower>::expand(
         break;
       } else {
 #ifdef OPT_CLEVEL_ROOT_READ
-        // printf("expand: help_update->load_ptr(thread_id) = %p [tid=%lu]\n", help_update->load_ptr(thread_id), thread_id);
         m_copy = help_update->load_ptr(t_id);
-        // printf("expand: m_copy = %p [tid=%lu]\n", m_copy, thread_id);
-        // m_copy = meta.load();
 #else
         m_copy = meta.load();
 #endif

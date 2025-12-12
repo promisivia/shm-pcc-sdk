@@ -2,7 +2,7 @@
 #define SHM_DS_UTILS_H
 
 /* Use CXL memory */
-#define USE_CXL
+// #define USE_CXL
 
 // #define USE_DISTRI_CXL
 
