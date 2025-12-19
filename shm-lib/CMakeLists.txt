@@ -5,11 +5,13 @@ project(shm-lib)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # 查找numa库
 find_library(NUMA_LIB numa)
 
 # 查找ssh库
-find_package(Libssh REQUIRED)
+# find_package(Libssh REQUIRED)
 
 # 根据架构设置编译器标志
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i386|i686")
@@ -44,6 +46,13 @@ if(MEMKIND_LIB)
     target_link_libraries(shm-lib PRIVATE ${MEMKIND_LIB})
 else()
     message(WARNING "memkind library not found; shm-lib uses memkind APIs")
+endif()
+
+find_library(MEMLINK_CLIENT_LIB NAMES memlink_client PATHS ${PROJECT_ROOT_DIR}/shared_libs)
+if(MEMLINK_CLIENT_LIB)
+    target_link_libraries(shm-lib PRIVATE ${MEMLINK_CLIENT_LIB})
+else()
+    message(WARNING "MEMLINK_CLIENT_LIB library not found")
 endif()
 
 # 公开头文件目录

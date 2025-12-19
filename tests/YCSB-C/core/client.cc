@@ -3,6 +3,7 @@
 #include "core/consistent_hash.h"
 #include "core/op_generator_int_key_addr.h"
 #include "core/perf.h"
+#include "db/utils.h"
 #include <cstdint>
 #include <memory>
 
@@ -128,6 +129,13 @@ int Client::TransactionRead(Operation &op) {
   }
 #else
   uint64_t value;
+  // static std::atomic<uint64_t> count = 0;
+  // count.fetch_add(1);
+  // extern void watch(void* addr, size_t len);
+  // if (SimThreadInfo::is_follower()) {
+  //     hex_dump(("./debug/dump_" + std::to_string(count) + ".bin").c_str(), (void *)0xcaffe0000000, 0x10000);
+  //     // fprintf(stderr, "dumped\n");
+  // }
   ret = db_[get_db(op.key)]->Read(op.key, value);
 #ifdef INT_KEY_ADDR
   // if (ret == DB::kOK) {

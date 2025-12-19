@@ -3,7 +3,7 @@
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 db_types=("clht" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
-DB_TYPE="btree_olc"
+DB_TYPE="bwtree"
 MODE="test"
 # DBG_LEVEL=1
 TEST_TYPE="fixed_db"
@@ -18,7 +18,7 @@ SERVER_THREADS_N=32
 # threads which dispatch requests
 CLIENT_THREADS_N=48
 DB_NUM=1
-MACHINE_NR=1
+MACHINE_NR=2
 FOLLOWER_LIST="localhost"
 CONFIG_PATH="config.ini"
 
@@ -229,10 +229,10 @@ case $MODE in
 	;;
 "test")
 	CLIENT_THREADS_N=48
-	thread_nums=(144)
+	thread_nums=(1)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloadb_zipfian.spec"
+		run_ycsbc "workloadc_zipfian.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"

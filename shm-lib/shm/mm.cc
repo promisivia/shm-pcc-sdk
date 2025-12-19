@@ -94,13 +94,46 @@ MemoryManager::MemoryManager()
     : memkind_pool(nullptr), base(nullptr), size(0) {};
 
 MemoryManager::MemoryManager(SystemMemoryMmapper *allocator, void *b, size_t s)
-    : allocator(allocator) {
+    : allocator(allocator), type(MemoryManager::MemoryType::CXL_1_0) {
   allocator->allocate(b, s);
   base = allocator->get_mempool_base();
   size = allocator->get_mempool_size();
   if (memkind_create_fixed(base, size, &memkind_pool) != 0) {
     throw std::runtime_error("Failed to create memkind pool.");
   }
+}
+
+// MemoryManager::MemoryManager(const char* name, size_t size)
+//     : allocator(allocator) {
+//   allocator->allocate(b, s);
+//   base = allocator->get_mempool_base();
+//   size = allocator->get_mempool_size();
+//   if (memkind_create_fixed(base, size, &memkind_pool) != 0) {
+//     throw std::runtime_error("Failed to create memkind pool.");
+//   }
+// }
+
+MemoryManager::MemoryManager(const char* name, void *base, size_t size): 
+    base(base), size(size), type(MemoryManager::MemoryType::UB), name(name) {
+    int ret = 0;
+    // ret = malloc_remote_memory(name, size);
+    // if (ret != 0) {
+    //     printf("Fail to malloc_remote_memory for %s size %ld\n", name, size);
+    //     free_remote_memory(name);
+    // }
+    base = mmap_remote_memory(name, base, size);
+    if (base == nullptr) {
+        printf("Fail to mmap_remote_memory for %s\n", (name));
+        printf("Using local memory\n");
+        base = malloc(size);
+    }
+    printf("mmap UB shared memory, base %p, size 0x%lx\n", base, size);
+    fflush(stdout);
+
+    ret = memkind_create_fixed(base, size, &memkind_pool);
+    if (ret != 0) {
+        throw std::runtime_error("Failed to create memkind pool.");
+    }
 }
 
 MemoryManager::MemoryManager(MemoryManager &&other) noexcept
@@ -137,12 +170,30 @@ MemoryManager &MemoryManager::operator=(MemoryManager &&other) noexcept {
 MemoryManager::~MemoryManager() {
   if (memkind_pool != nullptr)
     memkind_destroy_kind(memkind_pool);
+#if GLOBAL_SHM_TYPE == GLOBAL_SHM_TYPE_CXL_1_0
   delete allocator;
+#elif GLOBAL_SHM_TYPE == GLOBAL_SHM_TYPE_UB
+  // munmap_shared_memory(base, size);
+#endif
 }
 
 void *MemoryManager::malloc(size_t size) {
 #ifdef USE_CXL
-  return memkind_malloc(memkind_pool, size);
+  // int ret = memkind_check_available(memkind_pool);
+  // printf("memkind_check_available ret=%d\n", ret);
+  // printf("memkind_malloc called, memkind_pool=%p\n", memkind_pool);
+  void *start = memkind_malloc(memkind_pool, size);
+  // unsigned char* bytes = (unsigned char*)start;
+  // printf("memkind_malloc called, start: %llx, size: %llx, data:", start, size);
+  // fflush(stdout);
+  // for (int i = 0; i < 1; i++) {
+  //     printf("%02x ", bytes[i]);
+  // }
+  // printf("\n");
+  if (start == nullptr) {
+    throw std::runtime_error("memkind malloc return a NULL value\n");
+  }
+  return start;
 #else
   return ::malloc(size);
 #endif
@@ -180,10 +231,16 @@ void init_cacheable_allocator(const char *shm_path, void *base, size_t size) {
 
 void init_cxl_cacheable_allocator(const char *shm_path, void *base,
                                   size_t size) {
+#if GLOBAL_SHM_TYPE == GLOBAL_SHM_TYPE_CXL_1_0
   auto allocator =
       new CXLSystemMemoryMmapper(shm_path, SimThreadInfo::worker_machine_count,
                                  SimThreadInfo::worker_machine_id);
   cacheable = MemoryManager(allocator, base, size);
+#elif GLOBAL_SHM_TYPE == GLOBAL_SHM_TYPE_UB
+  cacheable = MemoryManager(shm_path, base, size);
+#else
+    printf("unknown GLOBAL_SHM_TYPE %d\n", GLOBAL_SHM_TYPE);
+#endif
 }
 
 #ifdef ENABLE_UNCACHE_MEM

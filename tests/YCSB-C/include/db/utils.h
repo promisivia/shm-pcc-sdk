@@ -17,6 +17,8 @@
 #define YCSB_KEY_LEN (16)
 #define YCSB_VALUE_LEN (15)
 
+void hex_dump(const char *filename, const void* addr, int len);
+
 // namespace ycsb {
 [[maybe_unused]] static inline uint64_t convert(const std::string &key) {
   uint64_t result = 0;

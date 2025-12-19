@@ -55,7 +55,7 @@ public:
       cpu_id = cpu_allocator.allocate_cpu(0);
 #else
       // 不使用消息队列时，将线程绑到节点123，共享内存分配到节点0上
-      cpu_id = cpu_allocator.allocate_cpu(1);
+      cpu_id = cpu_allocator.allocate_cpu(0);
 #endif
       set_pthread_affinity_attr(cpu_id, attr);
       pthread_create(&threads_[i], attr,
@@ -105,7 +105,7 @@ public:
     sum = this->sum.load(std::memory_order_acquire);
   }
 
-private:
+// private:
   struct ThreadArgsDeleTrans {
     TransactionThreadController *manager;
     uint32_t sim_machine_id;
@@ -130,6 +130,9 @@ private:
   }
 
   void *DelegateClientTrans(void *context) {
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "-1 db corrupted\n");
+    // }
     ThreadArgsDeleTrans *arg = (ThreadArgsDeleTrans *)context;
     std::vector<int> thread_ids;
     // auto thread_args = reinterpret_cast<ThreadArgsDeleTrans *>(arg);
@@ -138,11 +141,20 @@ private:
 #else
     SimThreadInfo::setup_worker_ids(arg->sim_machine_id, arg->sim_thread_id);
 #endif
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "0 db corrupted\n");
+    // }
     InitDelegateClient(thread_ids);
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "1 db corrupted\n");
+    // }
 #ifdef TIMING_LOAD_BALANCE
     for (auto db : *thread_args->dbs) {
       db->pool->start_sample = true;
     }
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "2 db corrupted\n");
+    // }
 #endif
     Client client(*dbs_
 #ifdef USE_CONSISTENT_HASH
@@ -150,6 +162,9 @@ private:
                   ring_
 #endif
     );
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "3 db corrupted\n");
+    // }
 
     // check thread affinity
 #if 0
@@ -163,7 +178,11 @@ private:
   }
 #endif
 
-    while (sync_var_.load(std::memory_order_acquire) != 1) {
+    // if (dbs_->size() != 1) {
+    //   fprintf(stderr, "4 db corrupted\n");
+    // }
+
+    while (sync_var_.load() != 1) {
       // wait for the global state to be set
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -227,10 +246,16 @@ private:
 
   void InitDelegateClient(std::vector<int> &thread_ids) {
 #ifndef USE_MSG_QUEUE
+    // if (dbs_ == nullptr) {
+    //   fprintf(stderr, "db is null\n");
+    // }
+    // fprintf(stderr, "dbs_=%p\n", dbs_);
+    // fprintf(stderr, "db_->size=%ld\n", dbs_->size());
     thread_ids.reserve(dbs_->size());
     for (auto db : *dbs_) {
       thread_ids.push_back(db->ThreadInit());
     }
+        // fprintf(stderr, "2 db_->size=%ld\n", dbs_->size());
 #endif
   }
 

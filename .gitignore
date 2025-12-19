@@ -3,3 +3,6 @@
 memory-bank
 build
 .cache
+shared_libs
+ub-example
+*.bin

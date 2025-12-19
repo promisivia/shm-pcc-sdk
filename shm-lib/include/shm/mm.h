@@ -8,6 +8,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <iostream>
+
+#include "shm/matrix_wrapper.h"
 
 #ifndef CACHE_LINE_SIZE
 #define CACHE_LINE_SIZE (64)
@@ -42,10 +45,13 @@ public:
   size_t get_mempool_size() override { return per_machine_size; }
 };
 
+
+
 class MemoryManager {
 public:
   MemoryManager();
   MemoryManager(SystemMemoryMmapper *allocator, void *base, size_t size);
+  MemoryManager(const char* name, void* base, size_t size);
   MemoryManager(const MemoryManager &other) = delete;
   MemoryManager(MemoryManager &&other) noexcept;
   MemoryManager &operator=(const MemoryManager &other) = delete;
@@ -57,12 +63,18 @@ public:
   int clalign(void **memptr, size_t size);
   void free(void *ptr);
 
-  memkind_t memkind_pool;
+  enum MemoryType {
+    UB,
+    CXL_1_0,
+  };
 private:
-  
+
+  memkind_t memkind_pool;
   void *base;
   size_t size;
   SystemMemoryMmapper *allocator;
+  MemoryType type;
+  const char* name;
 };
 
 extern MemoryManager cacheable;

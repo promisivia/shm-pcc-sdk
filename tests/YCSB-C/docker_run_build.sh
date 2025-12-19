@@ -1,8 +1,8 @@
 #!/bin/bash
-set -x
+set -e
 
 # 默认配置
-IMAGE="shm-pcc-sdk-ycsb:latest"
+IMAGE="shm-pcc-sdk:aarch64-openeuler"
 CONTAINER="ycsb-build-$(date +%s)"
 
 # 帮助信息
@@ -38,11 +38,14 @@ if ! docker images | grep -q "$(echo $IMAGE | cut -d: -f1)" || [[ "$BUILD" == tr
     docker build --network=host --build-arg MEMKIND_FROM_SOURCE=1 -t $IMAGE -f Dockerfile .
 fi
 
+pwd_path=$(pwd)
+abs_root_path=$(realpath $(pwd)/../..)
+
 # 准备运行命令
 ROOT_DIR=$(pwd)/../..
 docker run --rm -it \
-    -v "$(pwd)/../..":/workspace \
-    -w /workspace/tests/YCSB-C \
+    -v $abs_root_path:$abs_root_path \
+    -w $abs_root_path/tests/YCSB-C \
     $IMAGE \
     bash -c "chmod +x ./build.sh && ./build.sh $BUILD_ARGS"
 echo "构建完成！检查 $(pwd) 目录下的构建结果"

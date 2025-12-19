@@ -40,6 +40,10 @@ void PrepareShmEnv(inicpp::IniManager &ini) {
   std::string mem_type = cacheable_ini["mem_type"];
   std::string shm_path = cacheable_ini["device_path"];
   std::string base_string = cacheable_ini["mmap_base_addr"];
+#if GLOBAL_SHM_TYPE == GLOBAL_SHM_TYPE_CXL_UB
+  std::string ub_name = cacheable_ini["ub_name"];
+  shm_path = ub_name;
+#endif
   void *base = base_string.empty()
                    ? nullptr
                    : (void *)std::stoull(base_string, nullptr, 0);
@@ -63,9 +67,9 @@ void PrepareShmEnv(inicpp::IniManager &ini) {
     if (mem_type == "local") {
       init_uncacheable_allocator();
     }
-    // else if(mem_type == "cxl") {
-    //   init_cxl_cacheable_allocator(shm_path.c_str(), (void *)base, size);
-    // }
+    else if(mem_type == "cxl") {
+      init_cxl_cacheable_allocator(shm_path.c_str(), (void *)base, size);
+    }
     else {
       std::cerr << "Unknown uncacheable memory type: " << mem_type << std::endl;
       exit(EXIT_FAILURE);
@@ -172,6 +176,8 @@ void master_process(utils::Properties &props) {
 }
 
 void follower_process(utils::Properties &props) {
+  fprintf(stderr, "current pid=%d, sleep for 20s\n", getpid());
+  // std::this_thread::sleep_for(std::chrono::milliseconds(20000));
   std::string hexAddrStr = props.GetProperty("share_var");
   void *addr = nullptr;
 
@@ -179,8 +185,14 @@ void follower_process(utils::Properties &props) {
   ss << std::hex << hexAddrStr;
   ss >> addr;
   g_var_struct = (GlobalVariables *)addr;
+  printf("shared var=%p\n", g_var_struct);
+  fflush(stdout);
 
   auto trx_thread_controller = g_var_struct->trx_thread_controller;
+  printf("follower dbs=%p\n", trx_thread_controller->dbs_);
+  printf("follower dbs size=%lu\n", trx_thread_controller->dbs_->size());
+  printf("follower 1st dbs=%p\n", trx_thread_controller->dbs_->data());
+  fflush(stdout);
 
   trx_thread_controller->StartThreads();
   trx_thread_controller->WaitForLocalThreads();

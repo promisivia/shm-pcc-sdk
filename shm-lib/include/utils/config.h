@@ -2,6 +2,7 @@
 #define SHM_DS_UTILS_H
 
 /* Use CXL memory */
+#define USE_CXL
 
 // #define USE_DISTRI_CXL
 
@@ -9,6 +10,11 @@
 // #define NO_CC
 
 // #define OPT_NO_CC
+
+#define GLOBAL_SHM_TYPE_UB (0)
+#define GLOBAL_SHM_TYPE_CXL_1_0 (1)
+
+#define GLOBAL_SHM_TYPE (0)
 
 #ifdef NO_CC
     #define BYPASS_CACHE_DEFAULT (true)

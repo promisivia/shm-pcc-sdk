@@ -8,17 +8,21 @@ project(YCSBC)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(Libssh REQUIRED)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i386|i686")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -mcx16 -march=native -msse4.1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -mcx16 -march=native -msse4.1")
 else()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -latomic -march=native")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall")
 endif()
 #  -fsanitize=address -fno-omit-frame-pointer
 
-# set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Release)
+
+set(PROJECT_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../)
 
 # Include directories
 include_directories(include)
@@ -56,7 +60,7 @@ if(VARIANT STREQUAL "limit_atomic")
 endif()
 
 add_db("bwtree_db.cc" "BwTree" "bwtree" "ENABLE_BWTREE_DB" "PUBLIC")
-add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
+# add_db("clevel_hash_db.cc" "Clevel-Hashing" "clevel-hash" "ENABLE_CLEVEL_HASH_DB" "INTERFACE")
 # add_db("clht_db.cc" "CLHT" "clht" "ENABLE_CLHT_DB" "PUBLIC")
 # add_db("hot_db.cc" "HOT" "hot" "ENABLE_HOT_DB" "INTERFACE")
 # add_db("level_hash_db.cc" "Level-Hashing" "levelhash" "ENABLE_LEVEL_HASH_DB" "PUBLIC")
@@ -98,7 +102,6 @@ macro(add_ycsbc_executable target_name compile_definitions)
             target_compile_definitions(${lib} INTERFACE ${compile_definitions})
         endforeach()
         # 查找并链接系统库，避免依赖 RadixART 才带上它们
-        find_library(JemallocLib jemalloc)
         if(JemallocLib)
             target_link_libraries(${target_name} ${JemallocLib})
         endif()

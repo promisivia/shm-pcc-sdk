@@ -678,6 +678,9 @@ protected:
    */
   inline GCMetaData *GetGCMetaData(int thread_id) {
     // The thread ID must be within the range
+    if (!(thread_id >= 0 && thread_id < static_cast<int>(thread_num))) {
+      fprintf(stderr, "thread id %d thread num %ld\n", thread_id, thread_num);
+    }
     assert(thread_id >= 0 && thread_id < static_cast<int>(thread_num));
 
     return &(gc_metadata_p + thread_id)->data;
@@ -2968,7 +2971,7 @@ class BwTree : public BwTreeBase {
       // so GC should always succeed
 #ifndef NT_SIM
 // FIXME(FN): disable performing GC to avoid bugs
-      PerformGC(i);
+      // PerformGC(i);
 #endif
 
       // This will collect all nodes since we have adjusted the currenr thread
