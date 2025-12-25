@@ -571,7 +571,7 @@ extern void InitStatistics();
 extern void PrintStatistics();
 
 /*
- * Latency 时间统计辅助函数
+ * Latency statistics helper functions
  */
 inline void InitLatencyStatistics() {
   TimerAverage::AddNewEntry("read_latency");

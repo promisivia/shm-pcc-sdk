@@ -72,39 +72,39 @@ get_ini_value() {
     local section="$2"
     local key="$3"
     
-    # 状态变量
+    # State variable
     local in_section=false
     
-    # 逐行读取文件
+    # Read file line by line
     while IFS= read -r line; do
-        # 清理行内容：删除前后空格、删除注释
+        # Clean line content: remove leading/trailing spaces and comments
         line_cleaned=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[;#].*$//')
         
-        # 跳过空行
+        # Skip empty lines
         [[ -z "$line_cleaned" ]] && continue
         
-        # 节处理
+        # Section processing
         if [[ "$line_cleaned" =~ ^\[([^]]+)\]$ ]]; then
-            # 关闭当前节状态
+            # Close current section state
             $in_section && in_section=false
             
-            # 匹配目标节
+            # Match target section
             [[ "${BASH_REMATCH[1]}" == "$section" ]] && in_section=true
             
-        # 键值处理（仅在目标节中）
+        # Key-value processing (only in target section)
         elif $in_section; then
             if [[ "$line_cleaned" =~ ^([^=]+)=(.*)$ ]]; then
-                # 提取并清理键值
+                # Extract and clean key-value
                 current_key=$(echo "${BASH_REMATCH[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                 current_value=$(echo "${BASH_REMATCH[2]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                 
-                # 匹配目标键
+                # Match target key
                 [[ "$current_key" == "$key" ]] && echo "$current_value" && return 0
             fi
         fi
     done < "$file"
     
-    # 未找到返回错误
+    # Not found, return error
     return 1
 }
 

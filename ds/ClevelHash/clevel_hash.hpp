@@ -357,19 +357,19 @@ public:
         i++;
       }
       
-      // 确保first_level也被放入数组（如果还没有的话）
+      // Ensure first_level is also placed in the array (if not already)
       if (l == first_level && i < MAX_LEVEL) {
-        // 如果循环正常结束（l == first_level），将first_level放入数组
+        // If loop ends normally (l == first_level), place first_level in array
         levels[i] = first_level;
         // printf("set_levels: i = %d, l = %p, l->capacity = %lu\n", i, l, l->capacity);
         level_count = i + 1;
       } else if (i < MAX_LEVEL) {
-        // 如果因为其他原因退出（比如达到MAX_LEVEL），也要确保first_level在数组中
+        // If loop exits for other reasons (e.g., reached MAX_LEVEL), ensure first_level is in array
         levels[i] = first_level;
         // printf("set_levels: i = %d, l = %p, l->capacity = %lu\n", i, l, l->capacity);
         level_count = i + 1;
       } else {
-        // 如果超过MAX_LEVEL，至少保证first_level在数组末尾
+        // If exceeds MAX_LEVEL, at least ensure first_level is at the end of array
         levels[MAX_LEVEL - 1] = first_level;
         level_count = MAX_LEVEL;
       }

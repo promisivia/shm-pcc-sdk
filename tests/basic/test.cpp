@@ -269,7 +269,7 @@ enum CACHE_TYPE {
 
 CACHE_TYPE cache_type;
 ALLOC_TYPE alloc_type;
-size_t map_size = 1024ul * 1024 * 1024; // 默认大小
+size_t map_size = 1024ul * 1024 * 1024; // Default size
 const char *dev_name = "/dev/uncached_mem_dev";
 int ram_numa_node = 4;
 
@@ -315,26 +315,26 @@ void *allocate_memory(size_t size) {
       exit(1);
     }
     
-    // 尝试获取设备大小（对于字符设备可能失败，但不影响 mmap）
+    // Try to get device size (may fail for character devices, but doesn't affect mmap)
     off_t device_size = lseek(fd, 0, SEEK_END);
     if (device_size > 0 && (size_t)device_size < size) {
       fprintf(stderr, "Warning: Device size (%ld) is smaller than requested size (%zu). Using device size.\n", 
               device_size, size);
       size = device_size;
     }
-    lseek(fd, 0, SEEK_SET); // 重置文件指针
+    lseek(fd, 0, SEEK_SET); // Reset file pointer
     
-    // DAX 设备通常需要 2MB 对齐，尝试使用更大的对齐
+    // DAX devices typically require 2MB alignment, try using larger alignment
     const size_t dax_align = 2 * 1024 * 1024; // 2MB
     
-    // 确保 size 至少是 2MB 对齐的（对于 DAX 设备）
+    // Ensure size is at least 2MB aligned (for DAX devices)
     if (size < dax_align) {
       size = dax_align;
     } else {
       size = (size + dax_align - 1) & ~(dax_align - 1);
     }
     
-    // 尝试使用 MAP_SYNC（如果支持的话，用于 DAX 设备）
+    // Try using MAP_SYNC (if supported, for DAX devices)
     int mmap_flags = MAP_SHARED;
 #ifdef MAP_SYNC
     mmap_flags |= MAP_SYNC;
@@ -342,7 +342,7 @@ void *allocate_memory(size_t size) {
     
     addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
     if (addr == MAP_FAILED) {
-      // 如果 MAP_SYNC 失败，尝试不使用它
+      // If MAP_SYNC fails, try without it
       if (mmap_flags & MAP_SYNC) {
         mmap_flags &= ~MAP_SYNC;
         addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
@@ -354,7 +354,7 @@ void *allocate_memory(size_t size) {
         exit(1);
       }
     }
-    close(fd); // mmap 后可以关闭文件描述符
+    close(fd); // File descriptor can be closed after mmap
     break;
   }
   default:
@@ -419,7 +419,7 @@ void read_hit_test(size_t tsize) {
 
 void write_test(size_t tsize) {
   union CACHELINE *imap = (union CACHELINE *)allocate_memory(map_size);
-  unsigned int value = 0xDEADBEEF; // 初始化写入值
+  unsigned int value = 0xDEADBEEF; // Initialize write value
   struct timespec ts_begin, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   for (int repeat = 0; repeat < REPEAT; repeat++) {
@@ -875,42 +875,42 @@ void bank_read_test() {
 
 void clflush_4kb_test(size_t tsize) {
   const size_t test_size = 4096; // 4KB
-  const size_t num_tests = 4096; // 4096 个测试
+  const size_t num_tests = 4096; // 4096 tests
   void *mem = allocate_memory(test_size);
   
-  // 初始化内存
+  // Initialize memory
   memset(mem, 0xAA, test_size);
   
-  // 存储每次测试的时延（纳秒）
+  // Store latency for each test (nanoseconds)
   std::vector<double> latencies;
   latencies.reserve(num_tests);
   
   struct timespec ts_begin, ts_end;
   
-  // 外层循环：4096 个测试
+  // Outer loop: 4096 tests
   for (size_t i = 0; i < num_tests; ++i) {
-    // 每次测试：记录开始时间 -> 执行一次 clflush -> 记录结束时间
+    // Each test: record start time -> execute one clflush -> record end time
     clock_gettime(CLOCK_MONOTONIC, &ts_begin);
     // clflush_cache_range(mem, test_size);
     clflush(mem, test_size, true);
     clock_gettime(CLOCK_MONOTONIC, &ts_end);
     
-    // 计算单次时延（纳秒）
+    // Calculate single latency (nanoseconds)
     double elapsed = get_elapsed_time(ts_begin, ts_end);
-    double latency_ns = elapsed * 1e9; // 转换为纳秒
+    double latency_ns = elapsed * 1e9; // Convert to nanoseconds
     latencies.push_back(latency_ns);
   }
   
-  // 计算平均时延
+  // Calculate average latency
   double total_latency = 0.0;
   for (double lat : latencies) {
     total_latency += lat;
   }
-  double avg_time_per_op = total_latency / num_tests; // 平均每次操作的时延（纳秒）
-  double avg_time_per_byte = avg_time_per_op / test_size; // 每字节的开销（纳秒）
+  double avg_time_per_op = total_latency / num_tests; // Average latency per operation (nanoseconds)
+  double avg_time_per_byte = avg_time_per_op / test_size; // Cost per byte (nanoseconds)
   
-  // 计算总时间
-  double total_elapsed = total_latency / 1e9; // 转换为秒
+  // Calculate total time
+  double total_elapsed = total_latency / 1e9; // Convert to seconds
   
   printf("clflush+mfence 4KB test: %fsec, %fns/op, %fns/byte\n", 
          total_elapsed, avg_time_per_op, avg_time_per_byte);
@@ -945,7 +945,7 @@ int parse_argument(int argc, char **argv) {
     usage(argc, argv);
   }
 
-  // 解析 cache_type
+  // Parse cache_type
   if (!strcmp(argv[1], "cached"))
     cache_type = CACHED;
   else if (!strcmp(argv[1], "uncached"))
@@ -959,7 +959,7 @@ int parse_argument(int argc, char **argv) {
 
   int test_name_index = -1;
 
-  // 解析 alloc_type 和相关选项
+  // Parse alloc_type and related options
   const char *current_alloc_type_str = argv[2];
 
   if (!strcmp(current_alloc_type_str, "uncached_mem")) {
@@ -1009,13 +1009,13 @@ int parse_argument(int argc, char **argv) {
     usage(argc, argv);
   }
 
-  // 检查测试名称是否存在
+  // Check if test name exists
   if (test_name_index == -1 || test_name_index >= argc) {
     printf("Missing or invalid test name argument.\n");
     usage(argc, argv);
   }
 
-  return test_name_index; // 返回测试名称的索引
+  return test_name_index; // Return test name index
 }
 
 struct TestEntry {
@@ -1024,11 +1024,11 @@ struct TestEntry {
 };
 
 int main(int ac, char **av) {
-  // 解析命令行参数
+  // Parse command line arguments
   int test_name_idx = parse_argument(ac, av);
   auto test_name = std::string(av[test_name_idx]);
 
-  // 打印配置信息
+  // Print configuration information
   printf("Configuration:\n");
   printf("  Cache Type: %s\n", av[1]);
   printf("  Alloc Type: %s\n", av[2]);
@@ -1040,9 +1040,9 @@ int main(int ac, char **av) {
   printf("  Test Name: %s\n", test_name.c_str());
   printf("----------------------------------------\n");
 
-  int tsize = map_size / sizeof(int); // 注意：tsize 可能需要根据测试调整
+  int tsize = map_size / sizeof(int); // Note: tsize may need adjustment based on test
   pthread_t this_thread = pthread_self();
-  bind_thread_to_cpu(this_thread, 0); // 将主线程绑定到 CPU 0
+  bind_thread_to_cpu(this_thread, 0); // Bind main thread to CPU 0
 
   std::unordered_map<std::string, TestEntry> test_table = {
       {"read_miss", {read_miss_test, nullptr}},

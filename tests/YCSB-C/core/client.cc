@@ -78,7 +78,7 @@ int Client::TransactionScan(Operation &op, std::atomic<int> &finish, int &return
 
 int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
-  // 统计 workload tx 阶段的 update 时间
+  // Statistics for update time in workload tx phase
   TimerAverage timer_workload("update_workload");
   timer_workload.Start();
   
@@ -203,7 +203,7 @@ int Client::TransactionScan(Operation &op) {
 
 int Client::TransactionUpdate(Operation &op) {
   int ret;
-  // 统计 workload tx 阶段的 update 时间
+  // Statistics for update time in workload tx phase
   TimerAverage timer_workload("update_workload");
   timer_workload.Start();
   

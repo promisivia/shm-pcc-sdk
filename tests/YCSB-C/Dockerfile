@@ -1,7 +1,5 @@
 FROM ubuntu:20.04
 
-ENV https_proxy=http://ow.lixinrui000.cn:7890
-
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=UTC \
     APT_LISTCHANGES_FRONTEND=none
@@ -39,7 +37,7 @@ RUN apt-get update -o Acquire::Retries=5 && \
 WORKDIR /workspace
 
 # Optional: Build and install memkind from source. Disabled by default since libmemkind-dev is installed above.
-ARG MEMKIND_FROM_SOURCE=0
+ARG MEMKIND_FROM_SOURCE=1
 ARG MEMKIND_VERSION=master
 RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
       set -e; \

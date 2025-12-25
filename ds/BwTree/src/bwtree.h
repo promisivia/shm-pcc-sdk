@@ -61,8 +61,8 @@
 #define BWTREE_NODEBUG
 
 /*
- * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
- * 默认关闭，如需开启请在编译命令或此处取消注释
+ * BWTREE_AUTODUMP - Enable automatic tree structure/statistics export (for debugging)
+ * Disabled by default, uncomment in build command or here to enable
  */
 // #define BWTREE_AUTODUMP
 

@@ -1,0 +1,6 @@
+- [x] remove lock
+- [x] use a manually-managed array to replace std::unordered_map<SHMRef, void*> ref_to_addr
+- [ ] add GC (GC need first flush other machines' cacheline)
+- [ ] add ring to reuse after all memory is claimed
+- [ ] 多线程性能优化
+- [ ] crash-consistency

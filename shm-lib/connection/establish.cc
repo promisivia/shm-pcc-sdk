@@ -99,7 +99,7 @@ void SSHConnection::read_ssh_channel_output() {
   int nbytes;
 
   while (ssh_channel_is_open(channel) && !ssh_channel_is_eof(channel)) {
-    // 读取 stdout
+    // Read stdout
     nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
     if (nbytes > 0) {
       std::cout << "STDOUT: ";
@@ -110,7 +110,7 @@ void SSHConnection::read_ssh_channel_output() {
       break;
     }
 
-    // 读取 stderr
+    // Read stderr
     nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 1);
     if (nbytes > 0) {
       std::cerr << "STDERR: ";

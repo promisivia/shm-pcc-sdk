@@ -12,7 +12,7 @@
 
 // #define cas(old_val, new_val)  (old_val, new_val)
 
-// 辅助类：封装指针值和锁位操作
+// Helper class: Encapsulates pointer value and lock bit operations
 template <typename T>
 class LockedPointer {
 private:
@@ -29,37 +29,37 @@ private:
 public:
   LockedPointer(T* ptr = nullptr) : ptr_(ptr) {}
 
-  // 从带锁位的指针创建
+  // Create from a pointer with lock bit set
   static LockedPointer from_locked(T* locked_ptr) {
     uintptr_t val = reinterpret_cast<uintptr_t>(locked_ptr);
     return LockedPointer(reinterpret_cast<T*>(clear_lock_bit(val)));
   }
 
-  // 获取清除锁位后的指针
+  // Get pointer with lock bit cleared
   T* get() const { return ptr_; }
   operator T*() const { return ptr_; }
 
-  // 获取带锁位的指针
+  // Get pointer with lock bit set
   T* with_lock() const {
     uintptr_t val = reinterpret_cast<uintptr_t>(ptr_);
     return reinterpret_cast<T*>(set_lock_bit(val));
   }
 
-  // 检查指针是否有锁位
+  // Check if pointer has lock bit set
   static bool has_lock(T* ptr) {
     if (ptr == nullptr) return false;
     uintptr_t val = reinterpret_cast<uintptr_t>(ptr);
     return (val & static_cast<uintptr_t>(1)) != 0;
   }
 
-  // 清除锁位
+  // Clear lock bit from pointer
   static T* clear_lock(T* ptr) {
     if (ptr == nullptr) return nullptr;
     uintptr_t val = reinterpret_cast<uintptr_t>(ptr);
     return reinterpret_cast<T*>(clear_lock_bit(val));
   }
 
-  // 比较操作
+  // Comparison operations
   bool operator==(const LockedPointer& other) const {
     return ptr_ == other.ptr_;
   }
@@ -72,11 +72,11 @@ public:
 template <typename T>
 class HelpUpdate {
 private:
-  // 指向全局指针的指针（使用nt类型）
+  // Pointer to global pointer (using nt type)
   nt_pointer<T>* global_ptr_;
-  // 指向副本指针数组的指针（使用nt类型）
+  // Pointer to replica pointer array (using nt type)
   std::vector<nt_pointer<T>>* replica_ptrs_;
-  // 副本数量
+  // Number of replicas
   size_t replica_num_;
 
   static bool current_cas(nt_pointer<T> &ptr, T* old_val, T* new_val) {
@@ -99,10 +99,11 @@ public:
           printf("replica_num: %lu\n", replica_num_);
         }
 
-  // 更新所有副本一轮
-  // @expected_val: 期望的值
-  // @start_check_id: 开始检查的线程id
-  // @return: 只要返回就说明这一轮的update成功了，返回true说明expected_val没有变，返回false说明expected_val变了
+  // Update all replicas for one round
+  // @param expected_val: Expected value
+  // @param start_check_id: Thread ID to start checking from
+  // @return: Returns true if update succeeded and expected_val hasn't changed,
+  //          false if expected_val has changed. Any return indicates successful update.
   bool help_update(T* expected_val, uint64_t start_check_id) {
     // printf("help_update expected: %p, start_check_id: %lu\n", expected_val, start_check_id);
     assert(start_check_id < replica_num_);
@@ -128,16 +129,17 @@ public:
       }
     }
 
-    // 尝试将全局指针设置为带锁位的值
+    // Try to set global pointer with lock bit
     if (global_ptr_->compare_exchange_strong(expected.with_lock(), expected)) {
-      // 成功设置锁位，现在清除锁位
+      // Successfully set lock bit, now clear it
       return true;
     }
     return true;
   }
 
-  // 更新全局指针
-  // 算法：写G为A.1，然后依次写每个R[i]为A.1，全写完了写G为A.0
+  // Update global pointer
+  // Algorithm: Write G as A.1, then write each R[i] as A.1 in sequence,
+  //            after all writes complete, write G as A.0
   bool cas_ptr(T* old_val, T* new_val) {
     T* cur_global = global_ptr_->load();
 
@@ -157,11 +159,11 @@ public:
     return true;
   }
 
-  // 加载指针（线程thread_id的副本指针）
-  // 算法：
-  // (1) 如果R[i]以.0结尾，直接继续
-  // (2) 如果R[i]以.1结尾，帮助更新R[i+1]到R[N]为A.1
-  // 返回正确的ptr（清除锁位）
+  // Load pointer (replica pointer for thread thread_id)
+  // Algorithm:
+  // (1) If R[i] ends with .0, continue directly
+  // (2) If R[i] ends with .1, help update R[i+1] to R[N] as A.1
+  // Returns correct ptr (with lock bit cleared)
   T* load_ptr(size_t thread_id) {
     assert(thread_id < replica_num_);
     T* local_r = (*replica_ptrs_)[thread_id].load();

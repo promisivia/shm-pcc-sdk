@@ -51,10 +51,10 @@ public:
       pthread_attr_t *attr = new pthread_attr_t;
       int cpu_id;
 #ifdef USE_MSG_QUEUE
-      // 在使用消息队列时，将client线程绑到节点0，线程池的其他线程绑到节点123
+      // When using message queue, bind client threads to node 0, bind other thread pool threads to node 123
       cpu_id = cpu_allocator.allocate_cpu(0);
 #else
-      // 不使用消息队列时，将线程绑到节点123，共享内存分配到节点0上
+      // When not using message queue, bind threads to node 123, allocate shared memory on node 0
       cpu_id = cpu_allocator.allocate_cpu(1);
 #endif
       set_pthread_affinity_attr(cpu_id, attr);

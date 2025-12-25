@@ -31,13 +31,13 @@ MODULE_DESCRIPTION("Map uncached mem to userspace with huge pages.");
 MODULE_VERSION("0.1");
 
 static int uncached_mem_numa_node = -1;
-static int use_huge_pages = 1;  // 默认使用大页
+static int use_huge_pages = 1;  // Use huge pages by default
 
 struct buffer {
-  char **pages;  // 存储页地址（普通页或大页）
-  size_t page_count;  // 页的数量（普通页数量或大页数量）
-  size_t total_size;  // 总大小（字节）
-  int is_huge_page;  // 是否使用大页
+  char **pages;  // Store page addresses (normal pages or huge pages)
+  size_t page_count;  // Number of pages (normal page count or huge page count)
+  size_t total_size;  // Total size (bytes)
+  int is_huge_page;  // Whether to use huge pages
 };
 
 struct client {
@@ -84,13 +84,13 @@ static void buffer_destroy(struct buffer *buffer) {
       size_t pages_to_wb;
 
       if (buffer->is_huge_page) {
-        // 大页：恢复WB模式，以1GB为单位
+        // Huge page: restore WB mode, in 1GB units
         pages_to_wb = PAGES_PER_1GB;
         set_memory_wb((unsigned long)addr, pages_to_wb);
         ClearPageReserved(page);
         __free_pages(page, HUGE_PAGE_ORDER_1GB);
       } else {
-        // 普通页
+        // Normal page
         pages_to_wb = 1;
         set_memory_wb((unsigned long)addr, pages_to_wb);
         ClearPageReserved(page);
@@ -117,8 +117,8 @@ static int buffer_alloc(struct buffer *buffer, size_t total_size) {
   buffer->is_huge_page = use_huge_pages;
 
   if (buffer->is_huge_page) {
-    // 使用1GB huge pages
-    size_t gb_count = (total_size + SZ_1GB - 1) / SZ_1GB;  // 向上取整
+    // Use 1GB huge pages
+    size_t gb_count = (total_size + SZ_1GB - 1) / SZ_1GB;  // Round up
     
     printk(KERN_INFO "Allocating %zu 1GB huge pages (total size: %zu bytes)\n", 
            gb_count, total_size);
@@ -133,7 +133,7 @@ static int buffer_alloc(struct buffer *buffer, size_t total_size) {
       struct page *page = NULL;
       char *addr = NULL;
       
-      // 分配1GB huge page (order = 30)
+      // Allocate 1GB huge page (order = 30)
       if (uncached_mem_numa_node == -1) {
         page = alloc_pages(gfp_flags, HUGE_PAGE_ORDER_1GB);
       } else {
@@ -155,7 +155,7 @@ static int buffer_alloc(struct buffer *buffer, size_t total_size) {
       buffer->pages[i] = addr;
       SetPageReserved(page);
       
-      // 设置为WC模式，以1GB为单位（PAGES_PER_1GB页）
+      // Set to WC mode, in 1GB units (PAGES_PER_1GB pages)
       if (set_memory_wc((unsigned long)addr, PAGES_PER_1GB)) {
         printk(KERN_ERR "Failed to set memory WC for 1GB huge page %zu\n", i);
         ClearPageReserved(page);
@@ -166,7 +166,7 @@ static int buffer_alloc(struct buffer *buffer, size_t total_size) {
       printk(KERN_INFO "Allocated 1GB huge page %zu at %p\n", i, addr);
     }
   } else {
-    // 使用普通4KB页
+    // Use normal 4KB pages
     size_t page_count = total_size >> PAGE_SHIFT;
     
     printk(KERN_INFO "Allocating %zu normal pages (total size: %zu bytes)\n", 
@@ -215,12 +215,12 @@ static int buffer_map_vma(struct buffer *buffer, struct vm_area_struct *vma) {
   uaddr = vma->vm_start;
   
   if (buffer->is_huge_page) {
-    // 映射1GB huge pages
+    // Map 1GB huge pages
     for (i = 0; i < buffer->page_count && remaining_size > 0; i++) {
       unsigned long map_size = (remaining_size < SZ_1GB) ? remaining_size : SZ_1GB;
       unsigned long pfn = page_to_pfn(virt_to_page(buffer->pages[i]));
       
-      // 使用remap_pfn_range映射整个1GB区域（或剩余部分）
+      // Use remap_pfn_range to map the entire 1GB region (or remaining part)
       err = remap_pfn_range(vma, uaddr, pfn, map_size, vma->vm_page_prot);
       if (err) {
         printk(KERN_ERR "Failed to remap 1GB huge page %zu at %lx (size: %lu)\n", 
@@ -232,7 +232,7 @@ static int buffer_map_vma(struct buffer *buffer, struct vm_area_struct *vma) {
       remaining_size -= map_size;
     }
   } else {
-    // 映射普通4KB页
+    // Map normal 4KB pages
     for (i = 0; i < buffer->page_count; i++) {
       err = vm_insert_page(vma, uaddr, virt_to_page(buffer->pages[i]));
       if (err) {
@@ -284,7 +284,7 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   client->vm_start = vma->vm_start;
   size = vma->vm_end - vma->vm_start;
   
-  // 大小必须是页大小的倍数
+  // Size must be a multiple of page size
   if (size & ~PAGE_MASK)
     return -EINVAL;
 
@@ -292,7 +292,7 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   if (client->buffer.pages)
     return -EAGAIN;
 
-  // 如果使用大页，要求1GB对齐（可选，但推荐）
+  // If using huge pages, require 1GB alignment (optional, but recommended)
   if (use_huge_pages && (vma->vm_start & (SZ_1GB - 1))) {
     printk(KERN_WARNING "vm_start not 1GB aligned: %lx (recommended for huge pages)\n", 
            vma->vm_start);
