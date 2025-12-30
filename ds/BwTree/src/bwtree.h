@@ -8708,7 +8708,17 @@ class BwTree : public BwTreeBase {
      * might take a long time
      */
     EpochManager(BwTree *p_tree_p) : tree_p{p_tree_p} {
-      current_epoch_p = new EpochNode{};
+      // Use cacheable allocator for shared memory support
+      std::cout << "[EpochManager] Allocating EpochNode using cacheable.malloc" << std::endl;
+      std::cout.flush();
+      current_epoch_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      std::cout << "[EpochManager] Allocated EpochNode at " << current_epoch_p << std::endl;
+      std::cout.flush();
+      if (current_epoch_p == nullptr) {
+        std::cerr << "[EpochManager] ERROR: Failed to allocate EpochNode!" << std::endl;
+        throw std::runtime_error("Failed to allocate EpochNode");
+      }
+      new (current_epoch_p) EpochNode{};
 
       // These two are atomic variables but we could
       // simply assign to them
@@ -8832,7 +8842,9 @@ class BwTree : public BwTreeBase {
     void CreateNewEpoch() {
       bwt_printf("Creating new epoch...\n");
 
-      EpochNode *epoch_node_p = new EpochNode{};
+      // Use cacheable allocator for shared memory support
+      EpochNode *epoch_node_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (epoch_node_p) EpochNode{};
 
       epoch_node_p->active_thread_count = 0;
       epoch_node_p->garbage_list_p = nullptr;
@@ -8919,6 +8931,23 @@ class BwTree : public BwTreeBase {
       // return are the same one because the current point
       // could change in the middle of this function
       EpochNode *epoch_p = current_epoch_p;
+      
+      // Safety check: ensure epoch_p is valid
+      if (epoch_p == nullptr) {
+        bwt_printf("ERROR: current_epoch_p is nullptr in JoinEpoch()\n");
+        // Return a dummy epoch node or handle error
+        // For now, just return nullptr and let caller handle it
+        return nullptr;
+      }
+      
+      // Add retry limit to prevent infinite loop
+      static thread_local int retry_count = 0;
+      if (retry_count > 1000) {
+        bwt_printf("ERROR: JoinEpoch retry limit exceeded\n");
+        retry_count = 0;
+        return nullptr;
+      }
+      retry_count++;
 
       int64_t prev_count = epoch_p->active_thread_count.fetch_add(1);
 
@@ -8935,9 +8964,15 @@ class BwTree : public BwTreeBase {
         // This way the second worker thread actually incremented the epoch
         // counter twice
         epoch_p->active_thread_count.fetch_sub(1);
+        
+        // Small delay to prevent tight loop
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
 
         goto try_join_again;
       }
+      
+      // Reset retry count on success
+      retry_count = 0;
 
 #ifdef BWTREE_DEBUG
       epoch_join.fetch_add(1);
@@ -9264,14 +9299,16 @@ class BwTree : public BwTreeBase {
 
           // This invalidates any further reference to its
           // members (so we saved next pointer above)
-          delete garbage_node_p;
+          // Use cacheable.free for shared memory support
+          cacheable.free(const_cast<void*>(static_cast<const void*>(garbage_node_p)));
         }  // for
 
         // First need to save this in order to delete current node
         // safely
         EpochNode *next_epoch_node_p = head_epoch_p->next_p;
 
-        delete head_epoch_p;
+        // Use cacheable.free for shared memory support
+        cacheable.free(static_cast<void*>(head_epoch_p));
 
 #ifdef BWTREE_DEBUG
         epoch_freed++;

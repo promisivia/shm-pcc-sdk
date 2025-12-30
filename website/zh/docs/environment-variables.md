@@ -1,4 +1,17 @@
+lang: zh
+---
+layout: default
+title: Environment Variables
+nav_order: 2
+parent: 用户文档
+description: Environment variables used by SHM-PCC-SDK
+lang: zh
+---
+
 # Environment Variables
+
+{% include language-switcher.html %}
+
 
 This document describes the environment variables used by SHM-PCC-SDK.
 
@@ -125,6 +138,9 @@ export CXL_MEM_PATH=/dev/cxl/mem0
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
+
+{% include language-switcher.html %}
+
 export CXL_MEM_PATH=/dev/cxl/mem0
 export MEMKIND_MEM_TYPE=CXL
 ```
@@ -135,6 +151,9 @@ Create a `.env` file in the project root:
 
 ```bash
 # .env (DO NOT COMMIT THIS FILE)
+
+{% include language-switcher.html %}
+
 CXL_MEM_PATH=/dev/cxl/mem0
 MEMKIND_MEM_TYPE=CXL
 PREALLOC_SIZE=4096
@@ -173,6 +192,7 @@ If CXL memory is not accessible:
 - Verify permissions: `ls -l /dev/cxl/mem0`
 - Check if memkind supports CXL: `memkind --help`
 
+lang: zh
 ---
 
 For more information, see [User Guide](USER_GUIDE.md) or [Configuration](USER_GUIDE.md#configuration).

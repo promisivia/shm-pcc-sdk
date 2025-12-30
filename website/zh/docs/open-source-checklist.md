@@ -1,4 +1,17 @@
+lang: zh
+---
+layout: default
+title: Open Source Checklist
+nav_order: 2
+parent: 项目信息
+description: Comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release
+lang: zh
+---
+
 # Open Source Preparation Checklist
+
+{% include language-switcher.html %}
+
 
 This document provides a comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release.
 
@@ -376,6 +389,7 @@ Before submitting code for review:
 - [ ] Performance is acceptable
 - [ ] Code compiles without warnings
 
+lang: zh
 ---
 
 **Note**: This checklist should be customized based on your specific project needs and requirements.

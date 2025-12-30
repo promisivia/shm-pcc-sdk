@@ -1,6 +1,18 @@
-# User Guide
+---
+layout: default
+title: User Guide
+nav_order: 1
+parent: 用户文档
+description: Detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting
+lang: zh
+permalink: /zh/docs/user-guide.html
+---
 
-This document provides detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting.
+{% include language-switcher.html %}
+
+# 用户指南
+
+本文档提供了 SHM-PCC-SDK 的详细使用说明，包括安装、配置、运行示例和故障排除。
 
 ## Table of Contents
 

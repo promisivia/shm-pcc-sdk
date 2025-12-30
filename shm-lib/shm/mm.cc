@@ -9,6 +9,9 @@
 #include "utils/sim_id.h"
 
 #include <cstdint>
+#include <cstring>
+#include <cerrno>
+#include <iostream>
 #include <numaif.h>
 
 MemoryManager cacheable;
@@ -40,7 +43,24 @@ void SystemMemoryMmapper::allocate(void *b, size_t s) {
     mmap_base = mmap(0, mmap_size, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   } else {
-    mmap_base = mmap(b, mmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    // Use MAP_SHARED for multi-process shared memory
+    // Use MAP_FIXED if base address is provided to ensure same address space across processes
+    int flags = MAP_SHARED;
+    if (b != nullptr) {
+      flags |= MAP_FIXED;
+    }
+    mmap_base = mmap(b, mmap_size, PROT_READ | PROT_WRITE, flags, fd, 0);
+    
+    // Debug: Print actual mmap address
+    if (mmap_base != MAP_FAILED) {
+      if (mmap_base != b && b != nullptr) {
+        std::cout << "[SystemMemoryMmapper] WARNING: mmap returned " << mmap_base 
+                  << " instead of requested " << b << std::endl;
+      } else {
+        std::cout << "[SystemMemoryMmapper] mmap succeeded: base=" << mmap_base 
+                  << ", requested=" << b << std::endl;
+      }
+    }
   }
   if( mmap_base == MAP_FAILED) {
     throw std::runtime_error("Failed to mmap.");
@@ -98,9 +118,29 @@ MemoryManager::MemoryManager(SystemMemoryMmapper *allocator, void *b, size_t s)
   allocator->allocate(b, s);
   base = allocator->get_mempool_base();
   size = allocator->get_mempool_size();
+  
+  // Debug: Print memkind pool base and size
+  std::cout << "[MemoryManager] Creating memkind pool: base=" << base 
+            << ", size=" << size << ", requested_base=" << b << std::endl;
+  
+  // memkind_create_fixed requires the actual mmap base address, not the requested one
+  // If mmap failed to use MAP_FIXED, we need to use the actual mmap address
+  void* actual_base = allocator->get_mmap_base();
+  if (actual_base != base && actual_base != nullptr) {
+    std::cout << "[MemoryManager] WARNING: mmap base (" << actual_base 
+              << ") differs from requested base (" << b << ")" << std::endl;
+    std::cout << "[MemoryManager] Using actual mmap base for memkind pool" << std::endl;
+    base = actual_base;
+  }
+  
   if (memkind_create_fixed(base, size, &memkind_pool) != 0) {
+    std::cerr << "[MemoryManager] ERROR: Failed to create memkind pool. base=" 
+              << base << ", size=" << size << std::endl;
+    std::cerr << "[MemoryManager] memkind error: " << strerror(errno) << std::endl;
     throw std::runtime_error("Failed to create memkind pool.");
   }
+  
+  std::cout << "[MemoryManager] Successfully created memkind pool at " << base << std::endl;
 }
 
 MemoryManager::MemoryManager(MemoryManager &&other) noexcept
@@ -142,7 +182,33 @@ MemoryManager::~MemoryManager() {
 
 void *MemoryManager::malloc(size_t size) {
 #ifdef USE_CXL
-  return memkind_malloc(memkind_pool, size);
+  if (memkind_pool == nullptr) {
+    std::cerr << "[MemoryManager::malloc] ERROR: memkind_pool is nullptr!" << std::endl;
+    return ::malloc(size); // Fallback to heap
+  }
+  void* ptr = memkind_malloc(memkind_pool, size);
+  if (ptr == nullptr) {
+    std::cerr << "[MemoryManager::malloc] ERROR: memkind_malloc returned nullptr!" << std::endl;
+    return ::malloc(size); // Fallback to heap
+  }
+  // Debug: Check if allocated address is in expected range
+  uintptr_t ptr_val = reinterpret_cast<uintptr_t>(ptr);
+  uintptr_t base_val = reinterpret_cast<uintptr_t>(base);
+  if (ptr_val < base_val || ptr_val >= base_val + this->size) {
+    std::cerr << "[MemoryManager::malloc] WARNING: Allocated address " << ptr 
+              << " is outside memkind pool range [" << base << ", " 
+              << (void*)((char*)base + this->size) << "]" << std::endl;
+    std::cerr << "[MemoryManager::malloc] ptr_val=" << ptr_val 
+              << ", base_val=" << base_val << ", size=" << this->size << std::endl;
+  } else {
+    // Only print first few allocations to avoid spam
+    static int alloc_count = 0;
+    if (alloc_count++ < 5) {
+      std::cout << "[MemoryManager::malloc] Allocated " << size << " bytes at " << ptr 
+                << " (in pool range)" << std::endl;
+    }
+  }
+  return ptr;
 #else
   return ::malloc(size);
 #endif

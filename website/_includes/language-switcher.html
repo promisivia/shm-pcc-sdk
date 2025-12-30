@@ -1,0 +1,20 @@
+<!-- 语言切换器 -->
+<div class="language-switcher">
+  <select id="language-select" onchange="switchLanguage(this.value)">
+    <option value="zh" {% if page.lang == 'zh' or page.lang == nil %}selected{% endif %}>中文</option>
+    <option value="en" {% if page.lang == 'en' %}selected{% endif %}>English</option>
+  </select>
+</div>
+
+<script>
+// 页面加载时设置语言
+document.addEventListener('DOMContentLoaded', function() {
+  const currentPath = window.location.pathname;
+  const lang = currentPath.includes('/en/') ? 'en' : 'zh';
+  const select = document.getElementById('language-select');
+  if (select) {
+    select.value = lang;
+  }
+});
+</script>
+

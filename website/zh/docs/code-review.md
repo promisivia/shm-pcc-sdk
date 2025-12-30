@@ -1,4 +1,17 @@
+lang: zh
+---
+layout: default
+title: Code Review and Recommendations
+nav_order: 3
+parent: 项目信息
+description: Comprehensive code review and recommendations for preparing SHM-PCC-SDK for open source release
+lang: zh
+---
+
 # Code Review and Recommendations
+
+{% include language-switcher.html %}
+
 
 This document provides a comprehensive code review and recommendations for preparing SHM-PCC-SDK for open source release.
 
@@ -456,6 +469,7 @@ The SHM-PCC-SDK project has a solid foundation but needs several improvements be
 
 With these improvements, the project will be ready for a successful open source release.
 
+lang: zh
 ---
 
 **Next Steps**: 
