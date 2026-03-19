@@ -41,6 +41,9 @@ metric.txt
 # Documentation build
 docs/_build/
 docs/html/
+website/_build/
+website/.venv/
+website/.venv-*/
 
 # SVG files (if generated)
 *.svg

@@ -1,0 +1,28 @@
+# Main Navigation Configuration - English Version
+nav:
+  - title: Home
+    url: /en/index.html
+  - title: User Documentation
+    children:
+      - title: User Guide
+        url: /en/docs/user-guide.html
+      - title: Environment Variables
+        url: /en/docs/environment-variables.html
+  - title: Developer Documentation
+    children:
+      - title: Developer Guide
+        url: /en/docs/developer-guide.html
+      - title: Contributing Guide
+        url: /en/docs/contributing.html
+  - title: Project Information
+    children:
+      - title: Roadmap
+        url: /en/docs/roadmap.html
+      - title: Open Source Checklist
+        url: /en/docs/open-source-checklist.html
+      - title: Code Review and Recommendations
+        url: /en/docs/code-review.html
+
+
+
+
