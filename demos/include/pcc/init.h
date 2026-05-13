@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <cstdint>
+#include <string>
 
 namespace pcc {
 
@@ -12,6 +12,10 @@ struct ShmConfig {
     size_t shm_size;           // Size of shared memory in bytes
     int thread_num;            // Number of threads
     bool is_creator;           // Whether this process creates the shared memory
+    /** memkind (default) or cxlalloc (requires shm-lib WITH_CXLALLOC) */
+    std::string allocator_backend = "memkind";
+    uint16_t cxlalloc_thread_count = 64;
+    int8_t cxlalloc_heap_numa = -1;
 };
 
 // Initialize shared memory allocator

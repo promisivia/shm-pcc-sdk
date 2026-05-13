@@ -1,0 +1,4 @@
+interface:
+  display_name: "Website Doc Iteration"
+  short_description: "持续迭代 website 文档并执行模块化审校"
+  default_prompt: "Use $website-doc-iteration to update or review documentation under website/ with module-specific writing and checker rules."

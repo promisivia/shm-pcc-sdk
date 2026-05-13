@@ -13,6 +13,20 @@
 #include <vector>
 #include <atomic>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
+#include <x86intrin.h>
+#endif
+
+inline uint64_t timing_rdtsc_or_highres_ns() {
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
+  return __rdtsc();
+#else
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::high_resolution_clock::now().time_since_epoch())
+      .count();
+#endif
+}
+
 // #define QUEUE_LEN_PERF
 // #define QUEUE_LATENCY
 // #define TRX_LATENCY
@@ -241,9 +255,9 @@ class TimerInterfaceRdtsc {
 
   virtual ~TimerInterfaceRdtsc() = default;
 
-  virtual void Start() { start_ = __rdtsc(); }
+  virtual void Start() { start_ = timing_rdtsc_or_highres_ns(); }
   virtual void Stop() {
-    end_ = __rdtsc();
+    end_ = timing_rdtsc_or_highres_ns();
     Record();
   }
 

@@ -2,8 +2,9 @@
 #include "shm/mm.h"
 #include "utils/sim_id.h"
 
-#include <iostream>
+#include <cctype>
 #include <cstring>
+#include <iostream>
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -95,9 +96,30 @@ bool init_shm(const ShmConfig& config) {
             close(fd);
         }
         
-        // Initialize cacheable allocator
-        void* base_addr = reinterpret_cast<void*>(0xcaffe0000000);
-        init_cacheable_allocator(actual_path.c_str(), base_addr, actual_size);
+        void *base_addr = reinterpret_cast<void *>(0xcaffe0000000);
+        CacheableInitParams p{};
+        p.device_path = actual_path.c_str();
+        p.mmap_base = base_addr;
+        p.size_bytes = actual_size;
+        p.worker_machine_count = 1;
+        p.worker_machine_id = 0;
+        p.mem_type_cxl = is_dax_device;
+        p.cxlalloc_heap_numa = config.cxlalloc_heap_numa;
+        p.thread_count = config.cxlalloc_thread_count;
+        if (p.thread_count == 0) {
+          p.thread_count = 64;
+        }
+        std::string ab = config.allocator_backend;
+        for (auto &ch : ab) {
+          ch = static_cast<char>(
+              std::tolower(static_cast<unsigned char>(ch)));
+        }
+        if (ab == "cxlalloc") {
+          p.backend = CacheableAllocatorBackend::Cxlalloc;
+        } else {
+          p.backend = CacheableAllocatorBackend::Memkind;
+        }
+        init_cacheable_allocator_unified(p);
         
         if (is_dax_device) {
             std::cout << "DAX device initialized: " << actual_path 
