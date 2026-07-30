@@ -1,14 +1,4 @@
----
-layout: default
-title: shm-lib func API 参考
-nav_order: 5
-parent: 用户文档
-description: 按头文件分组列出 shm-lib 暴露的函数接口（func API），并补充关键参数含义与使用约束
-lang: zh
-permalink: /zh/docs/shm-lib-api.html
----
-
-{% include language-switcher.html %}
+# shm-lib API 参考
 
 ## 说明与范围
 
@@ -22,8 +12,8 @@ permalink: /zh/docs/shm-lib-api.html
 
 如果你更想看“如何从实际代码里使用这些 API”，请看：
 
-- `shm-lib` 最小程序教程：{doc}`shm-lib-step-by-step`
-- 面向 YCSB / BwTree 开发者的接口速览（含 `nt<T>` / `nt_pointer<T>`、message queue）：{doc}`shm-lib-interfaces-ycsb-bwtree`
+- 多进程共享内存教程：{doc}`../guides/multi-process`
+- `nt<T>` / `nt_pointer<T>` 使用说明：{doc}`../guides/nt-pointer`
 
 ## 1. `shm/mm.h`：allocator 初始化与 `cacheable`
 

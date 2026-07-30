@@ -6,5 +6,5 @@
 :maxdepth: 2
 
 func_api
+shm-lib-api
 ```
-

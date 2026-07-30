@@ -4,16 +4,16 @@ layout: default
 title: Contributing Guide
 nav_order: 2
 parent: Developer Documentation
-description: Guidelines and instructions for contributing to SHM-PCC-SDK
+description: Guidelines and instructions for contributing to CXL-SDK
 lang: en
 ---
 
-# Contributing to SHM-PCC-SDK
+# Contributing to CXL-SDK
 
 {% include language-switcher.html %}
 
 
-Thank you for your interest in contributing to SHM-PCC-SDK! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to CXL-SDK! This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -173,7 +173,7 @@ Fixes #456
 
 ### C++ Style
 
-Follow the project's C++ style guidelines (see [Developer Guide](DEVELOPER_GUIDE.md)):
+Follow the project's C++ style guidelines (see [Developer Guide](developer-guide.md)):
 
 - Use 4 spaces for indentation
 - Maximum line length: 100 characters
@@ -449,9 +449,9 @@ Closes #123
 
 ### Resources
 
-- [Developer Guide](DEVELOPER_GUIDE.md)
-- [User Guide](USER_GUIDE.md)
-- [API Reference](API_REFERENCE.md)
+- [Developer Guide](developer-guide.md)
+- [User Guide](user-guide.md)
+- [API Reference](../../zh/docs/api/index.md)
 - GitHub Discussions
 - GitHub Issues
 
@@ -469,5 +469,5 @@ Contributors will be:
 - Credited in release notes
 - Acknowledged in documentation
 
-Thank you for contributing to SHM-PCC-SDK! 🎉
+Thank you for contributing to CXL-SDK! 🎉
 

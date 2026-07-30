@@ -6,6 +6,10 @@
 #include <immintrin.h>
 #include <sched.h>
 
+#ifdef USE_CXL
+#include "shm/mm.h"
+#endif
+
 #ifdef LIMIT_ATOMIC
 #include "atomic.hpp"
 #include "utils/bypass_cache.h"

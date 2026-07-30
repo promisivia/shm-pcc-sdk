@@ -4,7 +4,7 @@ layout: default
 title: Environment Variables
 nav_order: 2
 parent: User Documentation
-description: Environment variables used by SHM-PCC-SDK
+description: Environment variables used by CXL-SDK
 lang: en
 ---
 
@@ -13,7 +13,7 @@ lang: en
 {% include language-switcher.html %}
 
 
-This document describes the environment variables used by SHM-PCC-SDK.
+This document describes the environment variables used by CXL-SDK.
 
 ## Sudo Password
 
@@ -195,6 +195,6 @@ If CXL memory is not accessible:
 lang: en
 ---
 
-For more information, see [User Guide](USER_GUIDE.md) or [Configuration](USER_GUIDE.md#configuration).
+For more information, see [User Guide](user-guide.md) or [Configuration](user-guide.md#configuration).
 
 

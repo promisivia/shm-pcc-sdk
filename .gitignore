@@ -15,6 +15,8 @@ build_*/
 *.dylib
 *.dll
 *.exe
+*.pyc
+__pycache__/
 compile_commands.json
 
 # Cache and temporary files
@@ -33,6 +35,7 @@ memory-bank
 
 # Test output files
 *.txt
+!CMakeLists.txt
 *.log
 output.txt
 throughput.txt
@@ -44,6 +47,10 @@ docs/html/
 website/_build/
 website/.venv/
 website/.venv-*/
+
+# Large local images and packaged artifacts
+*.tar
+*.tar.*
 
 # SVG files (if generated)
 *.svg

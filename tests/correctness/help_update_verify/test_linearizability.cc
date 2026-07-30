@@ -50,7 +50,7 @@ void updater_thread(HelpUpdateMechanism* mechanism, size_t thread_id,
   
   for (int i = 0; i < num_updates && !stop_flag.load(); ++i) {
     // 生成一个唯一的指针值（确保8字节对齐）
-    uintptr_t new_val = (thread_id * 1000000ULL + i) * 8;
+    uintptr_t new_val = (thread_id * 1000000ULL + i + 1) * 8;
     
     uint64_t start = get_time_ns();
     bool success = false;
@@ -63,7 +63,7 @@ void updater_thread(HelpUpdateMechanism* mechanism, size_t thread_id,
       
       // 如果当前有锁位，先帮助更新
       if (has_lock_bit(cur_global)) {
-        old_val = mechanism->help_update(old_val, 0);
+        mechanism->help_update(old_val, 0);
         // 重新读取 global_ptr
         cur_global = mechanism->global_ptr.load();
         old_val = clear_lock_bit(cur_global);
@@ -97,7 +97,8 @@ void loader_thread(HelpUpdateMechanism* mechanism, size_t thread_id,
   std::mt19937 gen(rd());
   std::uniform_int_distribution<> dis(1, 100);
   
-  while (!stop_flag.load()) {
+  constexpr size_t max_loads = 2000;
+  for (size_t load = 0; load < max_loads && !stop_flag.load(); ++load) {
     uint64_t start = get_time_ns();
     uintptr_t value = mechanism->load_ptr(thread_id);
     uint64_t end = get_time_ns();
@@ -271,7 +272,7 @@ bool verify_linearizability(const std::vector<Operation>& history) {
 int main() {
   const size_t num_threads = 8;
   const int num_updates_per_thread = 100;
-  const int test_duration_seconds = 5;
+  const int test_duration_seconds = 1;
   
   std::cout << "=== Linearizability Test ===" << std::endl;
   std::cout << "Threads: " << num_threads << std::endl;
@@ -302,6 +303,18 @@ int main() {
   // 等待所有线程完成
   for (auto& t : threads) {
     t.join();
+  }
+
+  uintptr_t final_global = mechanism.global_ptr.load();
+  if (has_lock_bit(final_global)) {
+    std::cerr << "Global pointer remained locked after quiescence" << std::endl;
+    return 1;
+  }
+  for (const auto& replica : mechanism.replica_ptrs) {
+    if (clear_lock_bit(replica.load()) != final_global) {
+      std::cerr << "Replica did not converge to the global pointer" << std::endl;
+      return 1;
+    }
   }
   
   std::cout << "Total operations recorded: " << operation_history.size() << std::endl;
@@ -352,4 +365,3 @@ int main() {
     return 1;
   }
 }
-

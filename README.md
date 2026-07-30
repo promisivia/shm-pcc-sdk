@@ -34,8 +34,8 @@ region, making it useful for both hardware deployments and local development.
   message queues, helper APIs, and multi-process coordination.
 - **Concurrent data structures** — BwTree, Masstree, CLHT, ClevelHash, HOT,
   RadixART, BTree-OLC, and additional experimental structures.
-- **Memory management** — memkind integration, `lsmalloc`, `cxlalloc`, and CXL
-  shared-memory allocators.
+- **Memory management** — memkind integration, `lsmalloc`, and CXL shared-memory
+  allocators, with an extension point for external allocator backends.
 - **Concurrency control** — optimistic concurrency control plus TinySTM, TL2,
   and SwissTM implementations.
 - **Evaluation workloads** — YCSB-C, STAMP, correctness tests, microbenchmarks,
@@ -69,10 +69,10 @@ runtime delegates allocation to the configured backend.
 | --- | --- | --- |
 | Shared-memory runtime | [`shm-lib/`](shm-lib/) | Mapping, allocation APIs, message queues, connection management, and utilities |
 | Data structures | [`ds/`](ds/) | Trees, tries, hash tables, locks, and persistent-memory variants |
-| Allocators | [`malloc/`](malloc/) | `lsmalloc`, `cxlalloc`, and CXL shared-memory allocators |
+| Allocators | [`malloc/`](malloc/) | `lsmalloc` and CXL shared-memory allocators |
 | Concurrency control | [`stm/`](stm/) | TinySTM, TL2, and SwissTM |
 | Benchmarks and tests | [`tests/`](tests/) | YCSB-C, allocator tests, basic tests, and correctness tests |
-| Applications | [`apps/`](apps/) | STAMP and ports including DBx1000, Ditto, GeminiGraph, hnswlib, and more |
+| Applications | [`apps/`](apps/) | The STAMP transactional-memory benchmark suite |
 | Examples | [`demos/`](demos/) | Minimal single-process and multi-process data-structure examples |
 | Documentation | [`website/`](website/) | Sphinx documentation in Chinese and English |
 
@@ -115,19 +115,16 @@ sudo apt-get install -y \
 ### Build the core library
 
 ```bash
-git clone git@github.com:promisivia/shm-pcc-sdk.git
+git clone https://github.com/promisivia/shm-pcc-sdk.git
 cd shm-pcc-sdk
 
 cmake -S shm-lib -B build/shm-lib
 cmake --build build/shm-lib --parallel
 ```
 
-To enable the Rust-based `cxlalloc` backend:
-
-```bash
-cmake -S shm-lib -B build/shm-lib-cxlalloc -DWITH_CXLALLOC=ON
-cmake --build build/shm-lib-cxlalloc --parallel
-```
+The optional `WITH_CXLALLOC` CMake switch is intended for integrations that
+provide a compatible external `cxlalloc` source tree through `CXLALLOC_ROOT`;
+that backend is not bundled in the public repository.
 
 ### Run the data-structure demos
 
@@ -193,7 +190,7 @@ allocator_backend=memkind
 | `device_path` | CXL device or file-backed shared-memory path |
 | `mmap_base_addr` | Requested virtual mapping base address |
 | `mem_size` | Region size in MiB |
-| `allocator_backend` | Lower allocator: `memkind` or `cxlalloc` |
+| `allocator_backend` | Lower allocator; the public build provides `memkind` |
 
 For multi-process runs, all participants must use compatible mapping addresses,
 region sizes, and shared-memory paths. The launcher may update ASLR settings and
@@ -237,6 +234,22 @@ The repository includes several levels of validation:
 Build and run each component from its own directory; several experiments have
 hardware-, privilege-, or topology-specific requirements.
 
+Before opening a pull request, run the repository-level readiness checks:
+
+```bash
+# Fast repository, documentation, artifact, and security hygiene checks
+./tools/opensource-harness/run.sh
+
+# Clean core, demo, YCSB-C, and strict documentation builds
+./tools/opensource-harness/run.sh --full
+```
+
+See the [harness documentation](tools/opensource-harness/README.md) for the
+complete check inventory and JSON reporting option. The
+[open-source readiness report](OPEN_SOURCE_READINESS.md) records the changes,
+verification evidence, paper-to-code mapping, and remaining hardware-dependent
+checks for this release.
+
 ## Contributing
 
 Contributions are welcome. Before opening a pull request:
@@ -248,6 +261,11 @@ Contributions are welcome. Before opening a pull request:
 
 Please report bugs and feature requests through
 [GitHub Issues](https://github.com/promisivia/shm-pcc-sdk/issues).
+
+Project policies: [contributing](CONTRIBUTING.md) ·
+[code of conduct](CODE_OF_CONDUCT.md) · [security](SECURITY.md) ·
+[support](SUPPORT.md) · [third-party notices](THIRD_PARTY_NOTICES.md) ·
+[readiness report](OPEN_SOURCE_READINESS.md)
 
 ## License and acknowledgements
 

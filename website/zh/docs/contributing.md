@@ -1,19 +1,8 @@
-lang: zh
----
-layout: default
-title: Contributing Guide
-nav_order: 2
-parent: 开发者文档
-description: Guidelines and instructions for contributing to SHM-PCC-SDK
-lang: zh
----
-
-# Contributing to SHM-PCC-SDK
-
-{% include language-switcher.html %}
+# Contributing to CXL-SDK
 
 
-Thank you for your interest in contributing to SHM-PCC-SDK! This document provides guidelines and instructions for contributing.
+
+Thank you for your interest in contributing to CXL-SDK! This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -173,7 +162,7 @@ Fixes #456
 
 ### C++ Style
 
-Follow the project's C++ style guidelines (see [Developer Guide](DEVELOPER_GUIDE.md)):
+Follow the project's C++ style guidelines (see [Developer Guide](developer-guide.md)):
 
 - Use 4 spaces for indentation
 - Maximum line length: 100 characters
@@ -188,13 +177,11 @@ Before committing, format your code:
 ```bash
 # If using clang-format
 
-{% include language-switcher.html %}
 
 clang-format -i src/**/*.cpp include/**/*.h
 
 # Or use the project's formatting script
 
-{% include language-switcher.html %}
 
 ./scripts/format.sh
 ```
@@ -229,21 +216,18 @@ clang-format -i src/**/*.cpp include/**/*.h
 ```bash
 # Run all tests
 
-{% include language-switcher.html %}
 
 cd tests
 ./run_all_tests.sh
 
 # Run specific test suite
 
-{% include language-switcher.html %}
 
 cd tests/basic
 ./run_tests.sh
 
 # Run with verbose output
 
-{% include language-switcher.html %}
 
 ./run_tests.sh -v
 ```
@@ -449,9 +433,9 @@ Closes #123
 
 ### Resources
 
-- [Developer Guide](DEVELOPER_GUIDE.md)
-- [User Guide](USER_GUIDE.md)
-- [API Reference](API_REFERENCE.md)
+- [Developer Guide](developer-guide.md)
+- [User Guide](user-guide.md)
+- [API Reference](api/index.md)
 - GitHub Discussions
 - GitHub Issues
 
@@ -469,5 +453,4 @@ Contributors will be:
 - Credited in release notes
 - Acknowledged in documentation
 
-Thank you for contributing to SHM-PCC-SDK! 🎉
-
+Thank you for contributing to CXL-SDK! 🎉

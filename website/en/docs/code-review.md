@@ -4,7 +4,7 @@ layout: default
 title: Code Review and Recommendations
 nav_order: 3
 parent: Project Information
-description: Comprehensive code review and recommendations for preparing SHM-PCC-SDK for open source release
+description: Comprehensive code review and recommendations for preparing CXL-SDK for open source release
 lang: en
 ---
 
@@ -13,11 +13,11 @@ lang: en
 {% include language-switcher.html %}
 
 
-This document provides a comprehensive code review and recommendations for preparing SHM-PCC-SDK for open source release.
+This document provides a comprehensive code review and recommendations for preparing CXL-SDK for open source release.
 
 ## Executive Summary
 
-The SHM-PCC-SDK project is a well-structured CXL memory system SDK with good potential for open source. However, several improvements are needed to make it production-ready and maintainable for the open source community.
+The CXL-SDK project is a well-structured CXL memory system SDK with good potential for open source. However, several improvements are needed to make it production-ready and maintainable for the open source community.
 
 ## Critical Issues
 
@@ -459,7 +459,7 @@ Before submitting code:
 
 ## Conclusion
 
-The SHM-PCC-SDK project has a solid foundation but needs several improvements before open source release. The most critical issues are:
+The CXL-SDK project has a solid foundation but needs several improvements before open source release. The most critical issues are:
 
 1. **Security**: Remove hardcoded credentials
 2. **Legal**: Add proper licensing

@@ -13,6 +13,12 @@ find_library(NUMA_LIB numa)
 find_package(Libssh QUIET)
 find_path(LIBSSH_INCLUDE_DIR libssh/libssh.h)
 find_library(LIBSSH_LIBRARY NAMES ssh)
+if(NOT TARGET Libssh::Libssh AND LIBSSH_INCLUDE_DIR AND LIBSSH_LIBRARY)
+  add_library(Libssh::Libssh UNKNOWN IMPORTED)
+  set_target_properties(Libssh::Libssh PROPERTIES
+    IMPORTED_LOCATION "${LIBSSH_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LIBSSH_INCLUDE_DIR}")
+endif()
 set(SHM_LIB_FULL_SSH FALSE)
 if(Libssh_FOUND)
   set(SHM_LIB_FULL_SSH TRUE)

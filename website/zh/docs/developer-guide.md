@@ -1,19 +1,8 @@
-lang: zh
----
-layout: default
-title: Developer Guide
-nav_order: 1
-parent: 开发者文档
-description: Guide for developers who want to contribute to SHM-PCC-SDK, understand the codebase structure, and extend the project
-lang: zh
----
-
 # Developer Guide
 
-{% include language-switcher.html %}
 
 
-This guide is for developers who want to contribute to SHM-PCC-SDK, understand the codebase structure, and extend the project.
+This guide is for developers who want to contribute to CXL-SDK, understand the codebase structure, and extend the project.
 
 ## Table of Contents
 
@@ -142,7 +131,6 @@ Example:
 ```cmake
 # CMakeLists.txt for new component
 
-{% include language-switcher.html %}
 
 cmake_minimum_required(VERSION 3.10)
 project(MyComponent)
@@ -342,14 +330,12 @@ TEST(IntegrationTest, DataStructureWithMemoryPool) {
 ```bash
 # Run all tests
 
-{% include language-switcher.html %}
 
 cd tests
 ./run_all_tests.sh
 
 # Run specific test
 
-{% include language-switcher.html %}
 
 cd tests/basic
 ./run_tests.sh
@@ -552,5 +538,4 @@ public:
 lang: zh
 ---
 
-For more information, see [API Reference](API_REFERENCE.md) or open an [Issue](https://github.com/your-org/shm-pcc-sdk/issues).
-
+For more information, see [API Reference](api/index.md) or open an [Issue](https://github.com/promisivia/shm-pcc-sdk/issues).

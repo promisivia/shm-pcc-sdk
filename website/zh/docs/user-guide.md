@@ -3,16 +3,15 @@ layout: default
 title: User Guide
 nav_order: 1
 parent: 用户文档
-description: Detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting
+description: Detailed usage instructions for CXL-SDK, including installation, configuration, running examples, and troubleshooting
 lang: zh
 permalink: /zh/docs/user-guide.html
 ---
 
-{% include language-switcher.html %}
 
 # 用户指南
 
-本文档提供了 SHM-PCC-SDK 的详细使用说明，包括安装、配置、运行示例和故障排除。
+本文档提供了 CXL-SDK 的详细使用说明，包括安装、配置、运行示例和故障排除。
 
 ## Table of Contents
 
@@ -54,7 +53,7 @@ permalink: /zh/docs/user-guide.html
 #### 1. Clone Repository
 
 ```bash
-git clone https://github.com/your-org/shm-pcc-sdk.git
+git clone https://github.com/promisivia/shm-pcc-sdk.git
 cd shm-pcc-sdk
 ```
 
@@ -532,7 +531,7 @@ A:
 
 ### Q4: How to contribute code?
 
-A: Please see [Developer Guide](DEVELOPER_GUIDE.md) and [Contributing Guide](CONTRIBUTING.md).
+A: Please see [Developer Guide](developer-guide.md) and [Contributing Guide](contributing.md).
 
 ### Q5: Where are the performance benchmarks?
 
@@ -544,4 +543,4 @@ A: Supports YCSB standard workloads (A-F) as well as custom workloads. Workload 
 
 ---
 
-**Need more help?** Please see [API Reference](API_REFERENCE.md) or open an [Issue](https://github.com/your-org/shm-pcc-sdk/issues).
+**Need more help?** Please see [API Reference](api/index.md) or open an [Issue](https://github.com/promisivia/shm-pcc-sdk/issues).

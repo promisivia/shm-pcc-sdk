@@ -5,7 +5,7 @@ layout: default
 title: Roadmap
 nav_order: 1
 parent: Project Information
-description: SHM-PCC-SDK 项目路线图
+description: CXL-SDK 项目路线图
 lang: en
 ---
 
@@ -14,4 +14,4 @@ lang: en
 {% include language-switcher.html %}
 
 
-![Roadmap](roadmap.png)
+![Roadmap](../../zh/docs/roadmap.png)

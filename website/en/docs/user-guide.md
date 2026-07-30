@@ -3,7 +3,7 @@ layout: default
 title: User Guide
 nav_order: 1
 parent: User Documentation
-description: Detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting
+description: Detailed usage instructions for CXL-SDK, including installation, configuration, running examples, and troubleshooting
 lang: en
 permalink: /en/docs/user-guide.html
 ---
@@ -12,7 +12,7 @@ permalink: /en/docs/user-guide.html
 
 # User Guide
 
-This document provides detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting.
+This document provides detailed usage instructions for CXL-SDK, including installation, configuration, running examples, and troubleshooting.
 
 ## Table of Contents
 
@@ -101,23 +101,37 @@ cd tests/YCSB-C
 
 ## Configuration
 
-[Add configuration details here]
+YCSB-C reads shared-memory settings from
+[`tests/YCSB-C/config.ini`](../../../tests/YCSB-C/config.ini). Set the backing
+device or file, mapping address, region size, and allocator before running a
+workload. Every process sharing the region must use compatible values.
 
 ## Usage Examples
 
-[Add usage examples here]
+The [`demos/`](../../../demos/README.md) guide contains minimal single-process
+and multi-process examples for BwTree and ClevelHash. YCSB workloads and database
+adapters are under [`tests/YCSB-C/`](../../../tests/YCSB-C/README.md).
 
 ## Performance Tuning
 
-[Add performance tuning tips here]
+Use a release build for measurements, pin workers consistently, record NUMA and
+CXL topology, warm up the workload, and repeat each run. Report both the complete
+configuration and variance; do not compare results gathered with different
+allocator, persistence, or concurrency-control settings.
 
 ## Troubleshooting
 
-[Add troubleshooting information here]
+Start with the smallest demo and a file-backed region. Confirm that the backing
+path is writable and large enough, all processes agree on the mapping address,
+and required NUMA, memkind, TBB, and libssh development packages are installed.
+The YCSB launcher may require privileges to change ASLR settings.
 
 ## FAQ
 
-[Add frequently asked questions here]
+**Can I develop without CXL hardware?** Yes. Use a writable file under
+`/dev/shm` as the backing region for functional development.
 
+**Is the API stable?** Not yet. CXL-SDK is active research software; pin a commit
+when reproducing experiments.
 
 

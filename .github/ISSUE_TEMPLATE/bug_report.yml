@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible CXL-SDK defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report vulnerabilities here; follow SECURITY.md instead.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The exact commit or release you tested.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, kernel, architecture, compiler, CMake, NUMA/CXL topology, and allocator.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal commands, configuration, and data needed to reproduce the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      render: shell
+    validations:
+      required: true

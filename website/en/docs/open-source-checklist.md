@@ -4,7 +4,7 @@ layout: default
 title: Open Source Checklist
 nav_order: 2
 parent: Project Information
-description: Comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release
+description: Comprehensive checklist and recommendations for preparing CXL-SDK for open source release
 lang: en
 ---
 
@@ -13,7 +13,7 @@ lang: en
 {% include language-switcher.html %}
 
 
-This document provides a comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release.
+This document provides a comprehensive checklist and recommendations for preparing CXL-SDK for open source release.
 
 ## 📋 Pre-Release Checklist
 

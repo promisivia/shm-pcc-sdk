@@ -1,4 +1,4 @@
-# SHM-PCC-SDK 文档
+# CXL-SDK 文档
 
 面向基于 `shm-lib` 开发 YCSB、BwTree 等系统的开发者，提供“怎么接入/怎么查 API”的文档站点（风格对齐 NCCL：Sphinx + RTD）。
 
@@ -10,6 +10,19 @@ content/index
 components/index
 guides/index
 api/index
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Project
+
+user-guide
+developer-guide
+contributing
+environment-variables
+code-review
+open-source-checklist
+roadmap
 ```
 
 ## 快速入口
