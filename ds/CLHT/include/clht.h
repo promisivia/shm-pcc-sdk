@@ -35,8 +35,7 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include "utils/config.h"
-
-// #include "utils/rlock.h"
+#include "utils/rlock.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,6 +169,8 @@ typedef volatile struct ALIGNED(CACHE_LINE_SIZE) bucket_s
 
 #if defined(__tile__)
 typedef volatile uint32_t clht_lock_t;
+#elif defined(MODIFY)
+typedef rlock_t clht_lock_t;
 #else
 typedef volatile uint8_t clht_lock_t;
 #endif
@@ -253,8 +254,8 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht_hashtable_s
       volatile uint32_t num_expands;
       union
       {
-	volatile uint32_t num_expands_threshold;
-	uint32_t num_buckets_prev;
+        volatile uint32_t num_expands_threshold;
+        uint32_t num_buckets_prev;
       };
       volatile int32_t is_helper;
       volatile int32_t helper_done;

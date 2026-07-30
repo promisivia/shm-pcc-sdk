@@ -1,6 +1,4 @@
-FROM hub.oepkgs.net/openeuler/openeuler:latest
-
-ENV TZ=UTC
+FROM openeuler/openeuler:24.03
 
 # Install development tools and dependencies using dnf (openEuler package manager)
 RUN dnf update -y && \
@@ -14,8 +12,6 @@ RUN dnf update -y && \
       numactl \
       numactl-devel \
       tbb-devel \
-      libpmem-devel \
-      libpmemobj-devel \
       libssh-devel \
       openssl-devel \
       libatomic \
@@ -28,8 +24,6 @@ RUN dnf update -y && \
       boost-devel \
       ca-certificates \
       curl \
-      python3 \
-      python3-pip \
       which \
       tar \
       wget \
@@ -45,28 +39,19 @@ RUN echo "LANG=en_US.UTF-8" >> /etc/environment && \
 # Default workdir; the project will be bind-mounted here at runtime
 WORKDIR /workspace
 
-# Create a non-root user for development
-RUN useradd -m -s /bin/bash developer && \
-    usermod -aG wheel developer && \
-    echo "developer ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-# Set up git configuration for the container
-RUN git config --global init.defaultBranch main && \
-    git config --global pull.rebase false
-
 # Install cityhash library from source
 RUN echo "Installing cityhash from source..."; \
     cd /tmp && \
     git clone https://github.com/google/cityhash.git && \
     cd cityhash && \
-    ./configure --prefix=/usr && \
+    ./configure --prefix=/usr --build=x86_64-unknown-linux-gnu && \
     make -j"$(nproc)" && \
     make install && \
     ldconfig && \
     cd / && rm -rf /tmp/cityhash
 
 # Install memkind from openEuler repository or build from source
-ARG MEMKIND_FROM_SOURCE=0
+ARG MEMKIND_FROM_SOURCE=1
 ARG MEMKIND_VERSION=master
 RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
       set -e; \
@@ -97,27 +82,6 @@ RUN if [ "$MEMKIND_FROM_SOURCE" = "1" ]; then \
       dnf install -y memkind-devel || echo "memkind-devel not available in repository, will build from source if needed"; \
     fi
 
-# Switch to developer user and set up the environment
-USER developer
-WORKDIR /workspace
-
-# Set up environment variables for the developer user
-ENV HOME=/home/developer
-ENV USER=developer
-
-# Create a startup script that shows useful information
-RUN echo '#!/bin/bash' > /home/developer/startup.sh && \
-    echo 'echo "=== openEuler Development Environment ==="' >> /home/developer/startup.sh && \
-    echo 'echo "OS: $(cat /etc/os-release | grep PRETTY_NAME)"' >> /home/developer/startup.sh && \
-    echo 'echo "Kernel: $(uname -r)"' >> /home/developer/startup.sh && \
-    echo 'echo "Architecture: $(uname -m)"' >> /home/developer/startup.sh && \
-    echo 'echo "Available tools: gcc, cmake, git, numactl, etc."' >> /home/developer/startup.sh && \
-    echo 'echo "Working directory: $(pwd)"' >> /home/developer/startup.sh && \
-    echo 'echo "========================================="' >> /home/developer/startup.sh && \
-    echo 'exec "$@"' >> /home/developer/startup.sh && \
-    chmod +x /home/developer/startup.sh
-
-ENTRYPOINT ["/home/developer/startup.sh"]
 CMD ["bash"]
 
 

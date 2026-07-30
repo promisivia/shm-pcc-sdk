@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdarg>
+#include <cstdint>
 #include <limits.h>
 #include <limits>
 #include <memkind.h>
@@ -42,10 +43,33 @@ public:
   size_t get_mempool_size() override { return per_machine_size; }
 };
 
+/** Tag type for constructing cacheable backed by cxlalloc-static. */
+struct CxlallocCacheableTag {};
+
+enum class CacheableAllocatorBackend {
+  Memkind = 0,
+  Cxlalloc = 1,
+};
+
+struct CacheableInitParams {
+  CacheableAllocatorBackend backend;
+  /** True when INI mem_type is "cxl" (per-machine mmap slice for memkind). */
+  bool mem_type_cxl;
+  const char *device_path;
+  void *mmap_base;
+  size_t size_bytes;
+  int worker_machine_count;
+  int worker_machine_id;
+  /** Total allocator threads (cxlalloc); includes main thread id 0. */
+  uint16_t thread_count;
+  int8_t cxlalloc_heap_numa;
+};
+
 class MemoryManager {
 public:
   MemoryManager();
   MemoryManager(SystemMemoryMmapper *allocator, void *base, size_t size);
+  explicit MemoryManager(CxlallocCacheableTag, size_t reported_size_bytes);
   MemoryManager(const MemoryManager &other) = delete;
   MemoryManager(MemoryManager &&other) noexcept;
   MemoryManager &operator=(const MemoryManager &other) = delete;
@@ -57,9 +81,13 @@ public:
   int clalign(void **memptr, size_t size);
   void free(void *ptr);
 
+  bool is_cxlalloc_backend() const {
+    return backend_ == CacheableAllocatorBackend::Cxlalloc;
+  }
+
   memkind_t memkind_pool;
 private:
-  
+  CacheableAllocatorBackend backend_;
   void *base;
   size_t size;
   SystemMemoryMmapper *allocator;
@@ -102,4 +130,7 @@ void init_cacheable_allocator(const char *shm_path, void *base, size_t size);
 void init_cxl_cacheable_allocator(const char *shm_path, void *base,
                                   size_t size);
 
-void init_uncacheable_allocator();
+/** Single entry: memkind vs cxlalloc, INI-driven; keeps global `cacheable` API. */
+void init_cacheable_allocator_unified(const CacheableInitParams &params);
+
+void init_uncacheable_allocator(const char *shm_path, void *base, size_t size);

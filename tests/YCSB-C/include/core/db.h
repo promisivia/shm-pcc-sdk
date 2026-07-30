@@ -9,6 +9,7 @@
 #ifndef YCSB_C_DB_H_
 #define YCSB_C_DB_H_
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <atomic>
@@ -77,8 +78,16 @@ class DB {
   template <typename Func, typename... Args>
   int AsyncExecute(Func func, std::atomic<int> &finish, int &result, Args &&...args) {
     auto tmp_result = (std::remove_reference_t<decltype(result)>*)cacheable.malloc(sizeof(std::remove_reference_t<decltype(result)>));
+
     auto task = [tmp_result, &finish, func, args...]() mutable {
+    #ifdef MSG_FUNC_TIMING
+      TimerAverage timer("msg_timing_func");
+      timer.Start();
+    #endif
       *tmp_result = func(std::forward<Args>(args)...);
+    #ifdef MSG_FUNC_TIMING
+      timer.Stop();
+    #endif
       finish.store(1, std::memory_order_release);
     };
     result = *tmp_result;
@@ -108,20 +117,20 @@ class DB {
     return -1;
   };
 
-  virtual int Read(uint64_t key, uint64_t &value) {
+  virtual int Read(uint64_t key, uintptr_t &value) {
     return SyncExecute(
-        [this](uint64_t k, uint64_t &v) { return ReadInternal(k, v); }, key,
+        [this](uint64_t k, uintptr_t &v) { return ReadInternal(k, v); }, key,
         value);
   };
 
-  virtual int AsyncRead(uint64_t key, uint64_t &value, std::atomic<int> &finish,
+  virtual int AsyncRead(uint64_t key, uintptr_t &value, std::atomic<int> &finish,
                         int &result) {
     return AsyncExecute(
-        [this](uint64_t k, uint64_t &v) { return ReadInternal(k, v); }, finish,
+        [this](uint64_t k, uintptr_t &v) { return ReadInternal(k, v); }, finish,
         result, key, value);
   }
 
-  virtual int ReadInternal(uint64_t key, uint64_t &value) {
+  virtual int ReadInternal(uint64_t key, uintptr_t &value) {
     std::cerr
         << "Error: ReadInternal(uint64_t key) not overridden in derived class."
         << std::endl;
@@ -146,6 +155,18 @@ class DB {
     return -1;
   };
 
+  virtual int ScanInternal(uint64_t key, int len,
+    std::vector<std::vector<KVPair>>& result) {
+    return -1;
+  }
+
+  virtual int AsyncScan(uint64_t key, int len, std::vector<std::vector<KVPair>>& scan_result, std::atomic<int> &finish,
+                          int &result) {
+    return AsyncExecute(
+        [this](uint64_t key, int len, std::vector<std::vector<KVPair>>& scan_result) { return ScanInternal(key, len, scan_result); }, finish,
+        result, key, len, scan_result);
+  }
+
   ///
   /// Updates a record in the database.
   /// Field/value pairs in the specified vector are written to the record,
@@ -165,20 +186,20 @@ class DB {
     return -1;
   };
 
-  virtual int Update(uint64_t key, uint64_t value) {
+  virtual int Update(uint64_t key, uintptr_t value) {
     return SyncExecute(
-        [this](uint64_t k, uint64_t v) { return UpdateInternal(k, v); }, key,
+        [this](uint64_t k, uintptr_t v) { return UpdateInternal(k, v); }, key,
         value);
   };
 
-  virtual int AsyncUpdate(uint64_t key, uint64_t value, std::atomic<int> &finish,
+  virtual int AsyncUpdate(uint64_t key, uintptr_t value, std::atomic<int> &finish,
                           int &result) {
     return AsyncExecute(
-        [this](uint64_t k, uint64_t v) { return UpdateInternal(k, v); }, finish,
+        [this](uint64_t k, uintptr_t v) { return UpdateInternal(k, v); }, finish,
         result, key, value);
   }
 
-  virtual int UpdateInternal(uint64_t key, uint64_t value) {
+  virtual int UpdateInternal(uint64_t key, uintptr_t value) {
     std::cerr << "Error: UpdateInternal(uint64_t key) not overridden in "
                  "derived class."
               << std::endl;
@@ -203,20 +224,20 @@ class DB {
     return -1;
   };
 
-  virtual int Insert(uint64_t key, uint64_t value) {
+  virtual int Insert(uint64_t key, uintptr_t value) {
     return SyncExecute(
-        [this](uint64_t k, uint64_t v) { return InsertInternal(k, v); }, key,
+        [this](uint64_t k, uintptr_t v) { return InsertInternal(k, v); }, key,
         value);
   };
 
-  virtual int AsyncInsert(uint64_t key, uint64_t value, std::atomic<int> &finish,
+  virtual int AsyncInsert(uint64_t key, uintptr_t value, std::atomic<int> &finish,
                           int &result) {
     return AsyncExecute(
-        [this](uint64_t k, uint64_t v) { return InsertInternal(k, v); }, finish,
+        [this](uint64_t k, uintptr_t v) { return InsertInternal(k, v); }, finish,
         result, key, value);
   }
 
-  virtual int InsertInternal(uint64_t key, uint64_t value) {
+  virtual int InsertInternal(uint64_t key, uintptr_t value) {
     std::cerr << "Error: InsertInternal(uint64_t key) not overridden in "
                  "derived class."
               << std::endl;

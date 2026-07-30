@@ -5,26 +5,39 @@
 #include "core/perf.h"
 #include <cstdint>
 #include <memory>
+#include <atomic>
 
 namespace ycsbc {
 int InsertClient::Task(Operation &op) { return 0; }
 
 bool InsertClient::DoInsert() {
+#ifdef TRX_LATENCY
+  TimerAverage timer("insert_load");
+  timer.Start();
+#endif
+  bool ret;
 #ifdef INT_YCSBC_KEY
   uint64_t key = workload_->NextSequenceNumKey();
-  return (db_[get_db(key)]->Insert(key, key) == DB::kOK);
+  memory_fence();
+  ret = (db_[get_db(key)]->Insert(key, key) == DB::kOK);
 #elif defined(INT_KEY_ADDR)
   OpGeneratorIntKeyAddr op_gen(workload_);
   uint64_t key = workload_->NextSequenceNumKey();
   void *value = workload_->BuildPrefillValue();
-  return (db_[get_db(key)]->Insert(key, (uint64_t)value) == DB::kOK);
+  memory_fence();
+  ret = (db_[get_db(key)]->Insert(key, (uint64_t)value) == DB::kOK);
 #elif defined(YCSB_KEY)
   std::string key = workload_->NextSequenceKey();
   std::vector<DB::KVPair> pairs;
   workload_->BuildValues(pairs);
-  return (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
+  memory_fence();
+  ret = (db_[get_db(key)]->Insert(workload_->NextTable(), key, pairs) ==
           DB::kOK);
 #endif
+#ifdef TRX_LATENCY
+  timer.Stop();
+#endif
+  return ret;
 }
 
 #ifdef ASYNC_CLIENT
@@ -205,13 +218,16 @@ int InsertClient::TransactionScan(Operation &op) {
     cur_element_nr += result.size();
   }
 #else
-  throw "Scan: function not implemented!";
+  uint32_t db_index = get_db(op.key);
+  std::vector<std::vector<DB::KVPair>> result;
+  return db_[db_index]->ScanInternal(op.key, op.len, result);
 #endif
   return ret;
 }
 
 int InsertClient::TransactionUpdate(Operation &op) {
   int ret;
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();

@@ -3,6 +3,8 @@
 
 #include <memory>
 #include <random>
+#include <functional>
+#include <set>
 #include "tbb/tbb.h"
 #ifdef USE_CXL
 #include "utils/config.h"
@@ -173,6 +175,10 @@ bool leafnode::tryLock(int &needRestart) {
     upgradeToWriteLockOrRestart(version, needRestart);
     if (needRestart) return false;
 
+#ifdef NO_CC
+    clflush((char *)this, sizeof(leafnode));
+#endif
+
     return true;
 }
 
@@ -185,6 +191,9 @@ void leafnode::upgradeToWriteLockOrRestart(uint64_t &version, int &needRestart) 
 }
 
 void leafnode::writeUnlock(bool isOverWrite) {
+#ifdef NO_CC
+    clflush((char *)this, sizeof(leafnode));
+#endif
     if (isOverWrite)
         typeVersionLockObsolete.fetch_add(0b10);
     else
@@ -200,6 +209,11 @@ uint64_t leafnode::readLockOrRestart(int &needRestart) const {
         needRestart = LOCKED;
     else if (isObsolete(version))
         needRestart = OBSOLETE;
+
+#ifdef NO_CC
+    if (!needRestart)
+        clflush((char *)this, sizeof(leafnode));
+#endif
 
     return version;
 }
@@ -481,10 +495,6 @@ inter_retry:
                 goto from_root;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -529,10 +539,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char*)l,sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
     if (kx_.p >= 0 && l->key(kx_.p) == key) {
@@ -587,10 +593,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -634,10 +636,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -706,10 +704,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -754,10 +748,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
     if (kx_.p < 0) {
@@ -819,10 +809,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -867,10 +853,6 @@ leaf_retry:
         l = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -1014,10 +996,6 @@ leaf_retry:
         goto leaf_retry;
     }
 
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
-
     pkx_ = p->key_lower_bound_by(lv->fkey[depth - 1]);
     if (pkx_.p < 0) {
         printf("[correct_layer_root] cannot find layer's root\n");
@@ -1063,10 +1041,6 @@ inter_retry:
             else
                 goto from_root;
         }
-
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
 
         kx_ = p->key_lower_bound(key);
 
@@ -1562,10 +1536,6 @@ inter_retry:
             }
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1606,10 +1576,6 @@ leaf_retry:
         p = next;
         goto leaf_retry;
     }
-
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
 
     kx_ = p->key_lower_bound_by(key);
     if (kx_.p >= 0 || key == p->highest_()) {
@@ -1668,10 +1634,6 @@ inter_retry:
             }
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1713,10 +1675,6 @@ leaf_retry:
         goto leaf_retry;
     }
 
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
-
     kx_ = p->key_lower_bound(key);
 
     return p->inter_delete(this, root, depth, lv, kx_, threadInfo);
@@ -1752,10 +1710,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(key);
 
         if (kx_.i >= 0)
@@ -1785,10 +1739,6 @@ leaf_retry:
         else
             goto restart;
     }
-
-#ifdef NO_CC
-    clflush((char *)p, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(key);
 
@@ -1870,10 +1820,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -1903,10 +1849,6 @@ leaf_retry:
         else
             goto restart;
     }
-
-#ifdef NO_CC
-    clflush((char *)l, sizeof(leafnode));
-#endif
 
     kx_ = l->key_lower_bound_by(lv->fkey[depth]);
     if (kx_.p >= 0) {
@@ -1999,10 +1941,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -2031,10 +1969,6 @@ leaf_retry:
             else
                 goto restart;
         }
-
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
 
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);
@@ -2112,10 +2046,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(lv->fkey[depth]);
 
         if (kx_.i >= 0)
@@ -2144,10 +2074,6 @@ leaf_retry:
             else
                 goto restart;
         }
-
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
 
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);
@@ -2225,10 +2151,6 @@ inter_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)p, sizeof(leafnode));
-#endif
-
         kx_ = p->key_lower_bound(min);
 
         if (kx_.i >= 0)
@@ -2258,10 +2180,6 @@ leaf_retry:
                 goto restart;
         }
 
-#ifdef NO_CC
-        clflush((char *)l, sizeof(leafnode));
-#endif
-
         for (int i = 0; i < perm.size() && count < num; i++) {
             snapshot_v = l->value(perm[i]);
             if (l->key(perm[i]) >= min) {
@@ -2283,5 +2201,124 @@ leaf_retry:
 
     return count;
 }
+
+// Statistics function implementation - simplified to only get tree height
+std::pair<size_t, std::map<std::string, double>> masstree::getStatistics() const {
+    std::map<std::string, double> statistics;
+    size_t totalSize = 0;
+    uint32_t maxBTreeHeight = 0;
+    
+    // Simply get the root node's level, which represents the B+ tree height
+    // In Masstree, level() of a node represents the height from that node to leaves
+    void* root = const_cast<masstree*>(this)->root();
+    if (root != nullptr) {
+        leafnode* rootNode = reinterpret_cast<leafnode*>(root);
+        maxBTreeHeight = rootNode->level() + 1;
+    }
+    
+    statistics["maxBTreeHeight"] = maxBTreeHeight;
+    statistics["maxTrieDepth"] = 0;  // Not calculated for now
+    statistics["nodeCount"] = 0;     // Not calculated for now
+    statistics["leafCount"] = 0;     // Not calculated for now
+    statistics["internalCount"] = 0; // Not calculated for now
+    
+    return {totalSize, statistics};
+}
+
+// Helper function to traverse tree and collect statistics
+// void masstree::traverseTreeForStatistics(leafnode *node, uint32_t depth, 
+//                                          std::map<uint32_t, uint32_t> &trie_btree_heights,
+//                                          uint32_t &max_trie_depth) const {
+    // if (node == nullptr) return;
+    
+    // // Record B+ tree height for current trie layer
+    // // B+ tree height = node->level() + 1 (level() is height from node to leaves)
+    // uint32_t btree_height = node->level() + 1;
+    // if (trie_btree_heights.find(depth) == trie_btree_heights.end() || 
+    //     trie_btree_heights[depth] < btree_height) {
+    //     trie_btree_heights[depth] = btree_height;
+    // }
+    // if (depth > max_trie_depth) {
+    //     max_trie_depth = depth;
+    // }
+    
+    // // Traverse B+ tree to find all leaf nodes
+    // std::function<void(leafnode*, uint32_t)> traverse_btree;
+    // traverse_btree = [&](leafnode *n, uint32_t current_level) {
+    //     if (n == nullptr) return;
+        
+    //     if (current_level == 0) {
+    //         // Reached leaf node, check all entries for next layer
+    //         permuter perm = n->permute();
+    //         for (int i = 0; i < perm.size(); i++) {
+    //             void *val = n->value(perm[i]);
+    //             if (!IS_LV(val)) {
+    //                 // This entry points to next layer B+ tree
+    //                 leafnode *next_layer_root = reinterpret_cast<leafnode *>(val);
+    //                 traverseTreeForStatistics(next_layer_root, depth + 1, 
+    //                                          trie_btree_heights, max_trie_depth);
+    //             }
+    //         }
+            
+    //         // Also check next leaf node in the same layer
+    //         leafnode *next_leaf = n->next.load(std::memory_order_acquire);
+    //         if (next_leaf != nullptr) {
+    //             traverse_btree(next_leaf, 0);
+    //         }
+    //     } else {
+    //         // Internal node, traverse to children
+    //         permuter perm = n->permute();
+    //         for (int i = 0; i < perm.size(); i++) {
+    //             void *val = n->value(perm[i]);
+    //             if (val != nullptr && !IS_LV(val)) {
+    //                 leafnode *child = reinterpret_cast<leafnode *>(val);
+    //                 traverse_btree(child, current_level - 1);
+    //             }
+    //         }
+            
+    //         // Check leftmost pointer
+    //         if (n->leftmost_ptr != nullptr) {
+    //             traverse_btree(n->leftmost_ptr, current_level - 1);
+    //         }
+    //     }
+    // };
+    
+    // // Start traversal from root
+    // traverse_btree(node, node->level());
+// }
+
+// Analyze tree structure: traverse tree and collect trie/btree statistics
+// std::map<std::string, double> masstree::analyzeTreeStructure() const {
+    // std::map<std::string, double> statistics;
+    // std::map<uint32_t, uint32_t> trie_btree_heights;  // depth -> btree_height
+    // uint32_t max_trie_depth = 0;
+    
+    // void* root = const_cast<masstree*>(this)->root();
+    // if (root != nullptr) {
+    //     leafnode* rootNode = reinterpret_cast<leafnode*>(root);
+    //     traverseTreeForStatistics(rootNode, 0, trie_btree_heights, max_trie_depth);
+    // }
+    
+    // // Calculate statistics
+    // uint32_t total_trie_layers = max_trie_depth + 1;  // depth 0 to max_trie_depth
+    // uint32_t total_btree_layers = 0;
+    // for (const auto &pair : trie_btree_heights) {
+    //     total_btree_layers += pair.second;
+    // }
+    
+    // statistics["totalTrieLayers"] = (double)total_trie_layers;
+    // statistics["maxTrieDepth"] = (double)max_trie_depth;
+    // statistics["totalBTreeLayers"] = (double)total_btree_layers;
+    // statistics["avgBTreeLayersPerTrieLayer"] = (total_trie_layers > 0) ? 
+    //     (double)total_btree_layers / (double)total_trie_layers : 0.0;
+    
+    // // Add per-trie-layer B+ tree heights
+    // for (const auto &pair : trie_btree_heights) {
+    //     std::string key = "trieLayer" + std::to_string(pair.first) + "_btreeHeight";
+    //     statistics[key] = (double)pair.second;
+    // }
+    
+    // return statistics;
+// }
 
 }

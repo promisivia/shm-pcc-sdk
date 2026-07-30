@@ -19,8 +19,11 @@ int OpGeneratorIntKeyAddr::GenerateReadModifyWrite(
 int OpGeneratorIntKeyAddr::GenerateScan(
     cxl_vector<Operation>& ops) {
   uint64_t key = workload_->NextTransactionNumKey();
-  int len = workload_->NextScanLength();
-  ops.emplace_back(SCAN, key, reinterpret_cast<void*>(len));
+  int len;
+  do {
+    len = workload_->NextScanLength();
+  } while (len <= 0);
+  ops.emplace_back(SCAN, key, len);
   return 0;
 }
 

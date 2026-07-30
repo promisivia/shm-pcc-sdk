@@ -100,7 +100,7 @@ inline const CacheEntry *IndexCache::find_entry(const ShermanKey &k) {
 
 inline bool IndexCache::add_to_cache(InternalPage *page) {
   auto new_page = (InternalPage *)malloc(kInternalPageSize);
-  memcpy(new_page, page, kInternalPageSize);
+  memcpy((void *)new_page, (void *)page, kInternalPageSize);
   new_page->index_cache_freq = 0;
 
   if (this->add_entry(page->hdr.lowest, page->hdr.highest, new_page)) {

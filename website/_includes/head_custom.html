@@ -1,0 +1,91 @@
+<!-- 自定义头部 - 添加语言切换器到所有页面 -->
+<script>
+// 检测当前语言
+function getCurrentLanguage() {
+  const path = window.location.pathname;
+  if (path.includes('/en/')) {
+    return 'en';
+  }
+  return 'zh';
+}
+
+// 语言切换函数
+function switchLanguage(lang) {
+  const currentPath = window.location.pathname;
+  const baseUrl = '{{ site.baseurl }}';
+  
+  // 移除当前语言前缀
+  let newPath = currentPath.replace(/^\/(zh|en)\//, '/');
+  if (newPath === currentPath && currentPath.includes('/zh/')) {
+    newPath = currentPath.replace('/zh/', '/');
+  }
+  if (newPath === currentPath && currentPath.includes('/en/')) {
+    newPath = currentPath.replace('/en/', '/');
+  }
+  
+  // 添加新语言前缀
+  if (lang === 'zh') {
+    // 中文是默认语言，移除 /en/ 前缀或保持无前缀
+    if (newPath.startsWith(baseUrl + '/en/')) {
+      newPath = newPath.replace(baseUrl + '/en/', baseUrl + '/');
+    } else if (!newPath.startsWith(baseUrl + '/')) {
+      newPath = baseUrl + newPath;
+    }
+  } else {
+    // 英文需要 /en/ 前缀
+    if (!newPath.includes('/en/')) {
+      newPath = newPath.replace(baseUrl, baseUrl + '/en');
+    }
+  }
+  
+  window.location.href = newPath;
+}
+</script>
+
+<style>
+.language-switcher {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1000;
+  background: white;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  border: 1px solid #e0e0e0;
+}
+
+.language-switcher select {
+  border: 1px solid #ddd;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.875rem;
+  background: white;
+  cursor: pointer;
+}
+
+.language-switcher select:hover {
+  border-color: #999;
+}
+
+@media (max-width: 768px) {
+  .language-switcher {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin: 1rem;
+    display: inline-block;
+  }
+}
+
+/* 确保语言切换器在侧边栏上方 */
+@media (min-width: 769px) {
+  .language-switcher {
+    top: 1rem;
+    right: calc(1rem + 264px); /* 侧边栏宽度 + 边距 */
+  }
+}
+</style>
+
+
+

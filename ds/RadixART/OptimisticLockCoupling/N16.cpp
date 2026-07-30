@@ -39,11 +39,6 @@ namespace ART_OLC {
         return true;
     }
 
-    void N16::flush() {
-        clwb(keys, 16 * sizeof(uint8_t));
-        clwb(children, 16 * sizeof(N*));
-    }
-
     N *const *N16::getChildPos(const uint8_t k) const {
         __m128i cmp = _mm_cmpeq_epi8(_mm_set1_epi8(flipSign(k)),
                                      _mm_loadu_si128(reinterpret_cast<const __m128i *>(keys)));

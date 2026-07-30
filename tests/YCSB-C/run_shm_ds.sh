@@ -1,26 +1,29 @@
 #!/bin/bash
 
+set -e
+
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 db_types=("clht" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
-DB_TYPE="btree_olc"
+DB_TYPE="bwtree"
 MODE="test"
 # DBG_LEVEL=1
 TEST_TYPE="fixed_db"
-# USE_MSG_QUEUE=1
+# USE_MSG_QUEUE=1s
 CONFIG_TYPE=""
 # ENABLE_CAT=""
 ENABLE_SNIPER=0
 PERF=0
 
 # threads actually do the processing
-SERVER_THREADS_N=32
+SERVER_THREADS_N=144
 # threads which dispatch requests
 CLIENT_THREADS_N=48
 DB_NUM=1
 MACHINE_NR=1
 FOLLOWER_LIST="localhost"
 CONFIG_PATH="config.ini"
+VALUE_SIZE=8
 
 output_file="output.txt"
 throughput_file="throughput.txt"
@@ -35,6 +38,7 @@ real_workloads=(
 db_nums=(1)
 thread_nums=(1 2 4 8 16 32 64 128)
 client_thread_nums=(2 4 8 16 32 64 128)
+value_size_nums=(8 64 512 1024 4096)
 
 # args: 1. -db=DB_TYPE, 2. -debug=DBG_LEVEL, 3. -test_type=TEST_TYPE, 4. -use-msg=USE_MSG_QUEUE
 for i in "$@"; do
@@ -68,39 +72,39 @@ get_ini_value() {
     local section="$2"
     local key="$3"
     
-    # 状态变量
+    # State variable
     local in_section=false
     
-    # 逐行读取文件
+    # Read file line by line
     while IFS= read -r line; do
-        # 清理行内容：删除前后空格、删除注释
+        # Clean line content: remove leading/trailing spaces and comments
         line_cleaned=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[;#].*$//')
         
-        # 跳过空行
+        # Skip empty lines
         [[ -z "$line_cleaned" ]] && continue
         
-        # 节处理
+        # Section processing
         if [[ "$line_cleaned" =~ ^\[([^]]+)\]$ ]]; then
-            # 关闭当前节状态
+            # Close current section state
             $in_section && in_section=false
             
-            # 匹配目标节
+            # Match target section
             [[ "${BASH_REMATCH[1]}" == "$section" ]] && in_section=true
             
-        # 键值处理（仅在目标节中）
+        # Key-value processing (only in target section)
         elif $in_section; then
             if [[ "$line_cleaned" =~ ^([^=]+)=(.*)$ ]]; then
-                # 提取并清理键值
+                # Extract and clean key-value
                 current_key=$(echo "${BASH_REMATCH[1]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                 current_value=$(echo "${BASH_REMATCH[2]}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                 
-                # 匹配目标键
+                # Match target key
                 [[ "$current_key" == "$key" ]] && echo "$current_value" && return 0
             fi
         fi
     done < "$file"
     
-    # 未找到返回错误
+    # Not found, return error
     return 1
 }
 
@@ -168,13 +172,13 @@ run_cmd() {
 
 run_ycsbc() {
     local debug=${2:-false}
-    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\" -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -P \"workloads/$1\" -C $CONFIG_PATH"
+    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\" -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -P \"workloads/$1\" -C $CONFIG_PATH"
     run_cmd "$cmd" $debug
 }
 
 run_real() {
     local debug=${2:-false}
-    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -tracepath \"/disk/cwj/cache-trace/samples\" -tracename \"2020Mar\" -workloadname $1 -C $CONFIG_PATH"
+    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -tracepath \"/disk/cwj/cache-trace/samples\" -tracename \"2020Mar\" -workloadname $1 -C $CONFIG_PATH"
     run_cmd "$cmd" $debug
 }
 
@@ -198,14 +202,14 @@ do_real_task() {
   done
 }
 
-case $MODE in
+case $MODE in 
 "debug")
-	SERVER_THREADS_N=144
-	run_ycsbc "workloada_zipfian_1b.spec" true
+	SERVER_THREADS_N=2
+	run_ycsbc "workloada_zipfian.spec" true
 	;;
 "test-small")
 	SERVER_THREADS_N=32
-	run_ycsbc "workloada_small.spec"
+	run_ycsbc "workloada_zipfian.spec"
 	;;
 "ycsb-a")
 	CLIENT_THREADS_N=48
@@ -229,10 +233,10 @@ case $MODE in
 	;;
 "test")
 	CLIENT_THREADS_N=48
-	thread_nums=(144)
+	thread_nums=(48)
 	for thread_num in "${thread_nums[@]}"; do
 		SERVER_THREADS_N=$thread_num
-		run_ycsbc "workloadb_zipfian.spec"
+		run_ycsbc "workloade.spec"
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"
@@ -324,7 +328,7 @@ case $MODE in
 	;;
 "latency_overhead")
 	SERVER_THREADS_N=1
-	run_ycsbc "workloada_zipfian.spec"
+	run_ycsbc "workloada_zipfian_10m.spec"
 	;;
 "server_thread_scale_test")
   type=$CONFIG_TYPE
@@ -479,6 +483,22 @@ case $MODE in
 	for db_type in "${db_types[@]}"; do
 	./ycsbc -db "$db_type" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -P "workloads/workloada.spec"
 	sleep 5
+	done
+	;;
+"various-value-size")
+	db_types=("bwtree" "clevelhash")
+	# workloads=("workloada_zipfian.spec" "workloadb_zipfian.spec" "workloadc_zipfian.spec")
+	workloads=("workloada_zipfian_100m.spec" "workloadb_zipfian_100m.spec" "workloadc_zipfian_100m.spec")
+	value_size_nums=(8 64 512 1024 4096)
+	for db_type in "${db_types[@]}"; do
+		DB_TYPE=$db_type
+		for workload in "${workloads[@]}"; do
+			for value_size in "${value_size_nums[@]}"; do
+				VALUE_SIZE=$value_size
+				run_ycsbc $workload
+				sleep 1
+			done
+		done
 	done
 	;;
 *)

@@ -133,7 +133,9 @@ namespace ART_OLC {
 
         static void deleteNode(N *node);
 
+#ifdef NO_CC
         static void flushNode(N *node);
+#endif
 
         static std::tuple<N *, uint8_t> getSecondChild(N *node, const uint8_t k);
 
@@ -162,8 +164,6 @@ namespace ART_OLC {
         void copyTo(NODE *n) const;
 
         bool change(uint8_t key, N *val);
-
-        void flush();
 
         N *getChild(const uint8_t k) const;
 
@@ -223,8 +223,6 @@ namespace ART_OLC {
 
         bool change(uint8_t key, N *val);
 
-        void flush();
-
         N *getChild(const uint8_t k) const;
 
         void remove(uint8_t k);
@@ -260,8 +258,6 @@ namespace ART_OLC {
 
         bool change(uint8_t key, N *val);
 
-        void flush();
-
         N *getChild(const uint8_t k) const;
 
         void remove(uint8_t k);
@@ -293,8 +289,6 @@ namespace ART_OLC {
         void copyTo(NODE *n) const;
 
         bool change(uint8_t key, N *n);
-
-        void flush();
 
         N *getChild(const uint8_t k) const;
 

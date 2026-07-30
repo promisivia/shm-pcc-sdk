@@ -1,0 +1,17 @@
+/* Keep a clean, NCCL-like reading experience on top of RTD theme */
+
+/* Slightly larger body text for long API pages */
+.wy-nav-content {
+  max-width: 1050px;
+}
+
+/* Improve code block readability */
+div.highlight {
+  border-radius: 6px;
+}
+
+/* Reduce excessive margins on headings */
+h1, h2, h3 {
+  margin-top: 1.2em;
+}
+

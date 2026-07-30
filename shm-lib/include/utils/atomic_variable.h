@@ -102,6 +102,34 @@ public:
 
   operator T() const { return load(); }
 
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
+
   T load(memory_order __m = memory_order_seq_cst, bool nt = true) const {
     if (!cache_available[SimThreadInfo::worker_machine_id]) [[unlikely]] {
       nt = true;
@@ -261,6 +289,39 @@ public:
   }
 
   operator T() const { return load(); }
+
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
+
+  // Get raw pointer to underlying value for SIMD operations
+  // Only safe if nt<T> is standard layout and value is the first member
+  T* get_raw_ptr() { return &value; }
+  const T* get_raw_ptr() const { return &value; }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
 #ifdef NO_CC
@@ -432,6 +493,39 @@ public:
   }
 
   operator T() const { return load(); }
+
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
+
+  // Get raw pointer to underlying value for SIMD operations
+  // Only safe if aligned_nt<T> is standard layout and value is the first member
+  T* get_raw_ptr() { return &value; }
+  const T* get_raw_ptr() const { return &value; }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
 #ifdef NO_CC
@@ -626,6 +720,34 @@ public:
   }
 
   operator T() const { return load(); }
+
+  // Arithmetic operators
+  T operator+(const T &other) const { return load() + other; }
+  T operator-(const T &other) const { return load() - other; }
+  T operator*(const T &other) const { return load() * other; }
+  T operator/(const T &other) const { return load() / other; }
+  T operator%(const T &other) const { return load() % other; }
+  
+  // Bitwise operators
+  T operator&(const T &other) const { return load() & other; }
+  T operator|(const T &other) const { return load() | other; }
+  T operator^(const T &other) const { return load() ^ other; }
+  T operator<<(int shift) const { return load() << shift; }
+  T operator>>(int shift) const { return load() >> shift; }
+  T operator~() const { return ~load(); }
+  
+  // Comparison operators
+  bool operator==(const T &other) const { return load() == other; }
+  bool operator!=(const T &other) const { return load() != other; }
+  bool operator<(const T &other) const { return load() < other; }
+  bool operator<=(const T &other) const { return load() <= other; }
+  bool operator>(const T &other) const { return load() > other; }
+  bool operator>=(const T &other) const { return load() >= other; }
+  
+  // Unary operators
+  T operator+() const { return +load(); }
+  T operator-() const { return -load(); }
+  bool operator!() const { return !load(); }
 
   T load(std::memory_order __m = std::memory_order_seq_cst,
 #ifdef NO_CC

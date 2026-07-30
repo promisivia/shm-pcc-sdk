@@ -1,5 +1,6 @@
 #include "db/sherman_db.h"
 
+#include <cstdint>
 #include <numa.h>
 
 #include <cassert>
@@ -60,6 +61,7 @@ int ShermanDB::ReadInternal(uint64_t key, uint64_t& value) {
   read_cnt.fetch_add(1);
 #endif
   auto res = tree->search(key, value);
+  utils::AccessValueByAddress(value);
   return res ? DB::kOK : DB::kErrorNoData;
 }
 
@@ -83,6 +85,13 @@ int ShermanDB::InsertInternal(uint64_t key, uint64_t value) {
 int ShermanDB::DeleteInternal(uint64_t key) {
   tree->del(key);
   return DB::kOK;
+}
+
+int ShermanDB::ScanInternal(uint64_t key, int len,
+  std::vector<std::vector<KVPair>>& result) {
+  uint64_t* buffer = new uint64_t[len];
+  tree->range_query(key, key + len, buffer);
+  return DB::kErrorNoData;
 }
 
 void ShermanDB::InitStats() {

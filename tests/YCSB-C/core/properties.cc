@@ -136,6 +136,14 @@ std::string ParseCommandLine(int argc, const char *argv[],
       argindex++;
       props.SetProperty("config_file", argv[argindex]);
       argindex++;
+    } else if (strcmp(argv[argindex], "-valuesize") == 0) {
+      argindex++;
+      if (argindex >= argc) {
+        UsageMessage(argv[0]);
+        exit(0);
+      }
+      props.SetProperty("valuesize", argv[argindex]);
+      argindex++;
     } else {
       std::cout << "Unknown option '" << argv[argindex] << "'" << std::endl;
       exit(0);

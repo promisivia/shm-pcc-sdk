@@ -10,6 +10,7 @@
 #include <numa.h>
 #include <numaif.h>
 
+#include <cctype>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -36,23 +37,61 @@
 #endif
 
 void PrepareShmEnv(inicpp::IniManager &ini) {
-  auto cacheable_ini = ini["shm/cacheable"];
-  std::string mem_type = cacheable_ini["mem_type"];
-  std::string shm_path = cacheable_ini["device_path"];
-  std::string base_string = cacheable_ini["mmap_base_addr"];
+  inicpp::section cacheable_sec = ini["shm/cacheable"];
+  std::string mem_type = cacheable_sec["mem_type"];
+  std::string shm_path = cacheable_sec["device_path"];
+  std::string base_string = cacheable_sec["mmap_base_addr"];
   void *base = base_string.empty()
                    ? nullptr
                    : (void *)std::stoull(base_string, nullptr, 0);
-  size_t size = cacheable_ini["mem_size"]; // Unit is MB
+  size_t size = cacheable_sec["mem_size"]; // Unit is MB
   size *= 1024 * 1024;
-  if (mem_type == "local") {
-    init_cacheable_allocator(shm_path.c_str(), base, size);
-  } else if (mem_type == "cxl") {
-    init_cxl_cacheable_allocator(shm_path.c_str(), base, size);
+
+  std::string alloc_backend = cacheable_sec.toString("allocator_backend");
+  for (auto &ch : alloc_backend) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  if (alloc_backend.empty()) {
+    alloc_backend = "memkind";
+  }
+
+  CacheableInitParams params{};
+  params.device_path = shm_path.c_str();
+  params.mmap_base = base;
+  params.size_bytes = size;
+  params.worker_machine_count = SimThreadInfo::worker_machine_count;
+  params.worker_machine_id = SimThreadInfo::worker_machine_id;
+  params.mem_type_cxl = (mem_type == "cxl");
+  params.cxlalloc_heap_numa = -1;
+  {
+    int n = cacheable_sec.toInt("cxlalloc_heap_numa");
+    if (cacheable_sec.getLine("cxlalloc_heap_numa") != -1) {
+      params.cxlalloc_heap_numa = static_cast<int8_t>(n);
+    }
+  }
+  params.thread_count = 256;
+  {
+    int tc = cacheable_sec.toInt("cxlalloc_thread_count");
+    if (cacheable_sec.getLine("cxlalloc_thread_count") != -1 && tc > 0) {
+      params.thread_count = static_cast<uint16_t>(tc);
+    }
+  }
+
+  if (alloc_backend == "cxlalloc") {
+    params.backend = CacheableAllocatorBackend::Cxlalloc;
+  } else if (alloc_backend == "memkind") {
+    params.backend = CacheableAllocatorBackend::Memkind;
   } else {
+    std::cerr << "Unknown allocator_backend: " << alloc_backend << std::endl;
+    exit(EXIT_FAILURE);
+  }
+
+  if (mem_type != "local" && mem_type != "cxl") {
     std::cerr << "Unknown cacheable memory type: " << mem_type << std::endl;
     exit(EXIT_FAILURE);
   }
+
+  init_cacheable_allocator_unified(params);
 #ifdef ENABLE_UNCACHE_MEM
   if (ini["shm"]["enable_uncacheable"]) {
     auto uncacheable_ini = ini["shm/uncacheable"];
@@ -61,7 +100,7 @@ void PrepareShmEnv(inicpp::IniManager &ini) {
     uintptr_t base = uncacheable_ini["mmap_base_addr"];
     size_t size = uncacheable_ini["memory_size"];
     if (mem_type == "local") {
-      init_uncacheable_allocator();
+      init_uncacheable_allocator(shm_path.c_str(), (void *)base, size);
     }
     // else if(mem_type == "cxl") {
     //   init_cxl_cacheable_allocator(shm_path.c_str(), (void *)base, size);
@@ -119,6 +158,14 @@ void master_process(utils::Properties &props) {
     std::cerr << "Load throughput: 0 ops/ms" << std::endl;
   }
   
+  // Output statistics after loaddata phase, before transaction phase
+  // std::cerr << "\n=== Statistics after LoadData phase ===" << std::endl;
+  // for (uint32_t i = 0; i < SimThreadInfo::worker_db_count; i++) {
+  //   std::cerr << "DB " << i << ":" << std::endl;
+  //   (*dbs)[i]->GetStats();
+  // }
+  // std::cerr << "========================================\n" << std::endl;
+  
   auto machine_list =stoi(props.GetProperty("machinenum", "1")) == 1 ? std::vector<std::string>() :
       FollowerManager::split_machines(props.GetProperty("follower_list"));
   assert(machine_list.size() == SimThreadInfo::worker_machine_count - 1);
@@ -137,18 +184,15 @@ void master_process(utils::Properties &props) {
             << "filename\t"
             << ((props.GetProperty("tracename", "") != "")
                     ? props["workloadname"]
-                    : props["workload_file"])
-            << std::endl;
+                    : props["workload_file"]) << '\n'
+            << "value size\t" << int(VALUE_ADDR_SIZE) << '\n';
   // print_define();
   std::cerr << "dispatcher\t" << SimThreadInfo::dispatcher_thread_count << '\n'
             << "worker\t" << SimThreadInfo::worker_thread_count << '\n'
             << "dbnum\t" << SimThreadInfo::worker_db_count << '\n'
-            << "throughput\t" << "\033[31m" << (sum / duration / 1000000) << " Mops/s" << "\033[0m\n"
+            << "throughput\t" << (sum / duration / 1000000) << " Mops/s\n"
+            << "duration(s)\t" << duration << '\n'
             << "total operations\t" << sum << '\n';
-#ifdef TRX_LATENCY
-  TimerAverage::Print("read_latency", std::cerr);
-  TimerAverage::Print("update_latency", std::cerr);
-#endif
 
   PrintStatistics();
 
@@ -217,6 +261,8 @@ int main(const int argc, const char *argv[]) {
 
   int num_db = stoi(props.GetProperty("dbnum", "1"));
   SimThreadInfo::setup_worker_db_count(num_db);
+
+  set_value_size(std::stoi(props.GetProperty("valuesize", "0")));
 
 #ifdef CLEAR_CACHE
   uint64_t *clear_cache = new uint64_t[1024 * 1024 * 1024 / sizeof(uint64_t)];

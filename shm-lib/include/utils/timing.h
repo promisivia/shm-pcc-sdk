@@ -13,6 +13,20 @@
 #include <vector>
 #include <atomic>
 
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
+#include <x86intrin.h>
+#endif
+
+inline uint64_t timing_rdtsc_or_highres_ns() {
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)
+  return __rdtsc();
+#else
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::high_resolution_clock::now().time_since_epoch())
+      .count();
+#endif
+}
+
 // #define QUEUE_LEN_PERF
 // #define QUEUE_LATENCY
 // #define TRX_LATENCY
@@ -20,6 +34,10 @@
 // #define BWTREE_RETRY_COUNT
 // #define CLEVEL_DOUBLE_READ_COUNT
 // #define TRX_TYPE_STAT
+// #define PLOAD_GC_STAT
+// #define PLOAD_ROOT_STAT
+// #define PLOAD_COMMON_STAT
+// #define MSG_FUNC_TIMING
 
 /*
  * class Timer - Measures time usage for testing purpose
@@ -231,9 +249,136 @@ class TimerInterface {
   std::chrono::high_resolution_clock::time_point start_, end_;
 };
 
-/*
- * class TimerAverage - Timer class that records average time
- */
+class TimerInterfaceRdtsc {
+ public:
+  TimerInterfaceRdtsc(std::string name = "") : name_{name} {}
+
+  virtual ~TimerInterfaceRdtsc() = default;
+
+  virtual void Start() { start_ = timing_rdtsc_or_highres_ns(); }
+  virtual void Stop() {
+    end_ = timing_rdtsc_or_highres_ns();
+    Record();
+  }
+
+  virtual void Record() const = 0;
+
+ protected:
+  std::string name_;
+  uint64_t start_, end_;
+};
+
+// /*
+//  * class TimerAverage - Timer class that records average time
+//  */
+// class TimerAverageThreadLocal : public TimerInterface {
+//  public:
+//   TimerAverageThreadLocal(std::string name = "")
+//       : TimerInterface(name),
+//         local_time_(local_elapsed_times[name]),
+//         local_count_(local_elapsed_counts[name]),
+//         global_time_(global_elapsed_times[name]),
+//         global_count_(global_elapsed_counts[name]) {}
+
+//   ~TimerAverageThreadLocal() {
+//   }
+
+//   void Record() const override {
+//     auto elapsed =
+//         std::chrono::duration_cast<std::chrono::nanoseconds>(end_ - start_);
+//     local_time_ += elapsed.count();
+//     local_count_ += 1;
+//   }
+
+//   void Flush() const {
+//     if (local_count_ > 0) {
+//       global_time_.fetch_add(local_time_, std::memory_order_relaxed);
+//       global_count_.fetch_add(local_count_, std::memory_order_relaxed);
+//       local_time_ = 0;
+//       local_count_ = 0;
+//     }
+//   }
+
+//   void Print(const std::string& name, std::ostream& os) {
+//     Flush();
+//     auto& time = global_elapsed_times[name];
+//     auto& count = global_elapsed_counts[name];
+
+//     auto t = time.load();
+//     auto c = count.load();
+
+//     if (c != 0) {
+//       os << "Average time for " << name << ": "
+//          << static_cast<double>(t) / c << " ns\n";
+//       os << "Total count for " << name << ": " << c << std::endl;
+//     } else {
+//       os << "No measurements for " << name << std::endl;
+//     }
+//   }
+
+//   static void AddNewEntry(const std::string& name) {
+//     local_elapsed_times[name] = 0;
+//     local_elapsed_counts[name] = 0;
+
+//     global_elapsed_times.emplace(name, 0);
+//     global_elapsed_counts.emplace(name, 0);
+//   }
+
+//  private:
+//   // thread-local data
+//   static thread_local std::unordered_map<std::string, uint64_t> local_elapsed_times;
+//   static thread_local std::unordered_map<std::string, uint64_t> local_elapsed_counts;
+
+//   // global + atomic merge target
+//   static std::unordered_map<std::string, std::atomic<uint64_t>> global_elapsed_times;
+//   static std::unordered_map<std::string, std::atomic<uint64_t>> global_elapsed_counts;
+
+//   uint64_t& local_time_;
+//   uint64_t& local_count_;
+//   std::atomic<uint64_t>& global_time_;
+//   std::atomic<uint64_t>& global_count_;
+// };
+
+class TimerAverageRdtsc : public TimerInterfaceRdtsc {
+ public:
+  TimerAverageRdtsc(std::string name = "")
+      : TimerInterfaceRdtsc(name),
+        total_time_{elapsed_times_[name]},
+        total_count_(elapsed_counts_[name]) {}
+
+  void Record() const override {
+    auto elapsed = end_ - start_;
+    total_time_ += elapsed;
+    total_count_ += 1;
+  }
+
+  static void Print(std::string name, std::ostream& os) {
+    auto it_time = elapsed_times_.find(name);
+    auto it_count = elapsed_counts_.find(name);
+    auto time = it_time->second;
+    auto count = it_count->second;
+    if (count != 0) {
+      os << "Average time for " << name << ": "
+         << static_cast<double>(time) / count << " ns" << std::endl;
+      os << "Total count for " << name << ": " << count << std::endl;
+    } else {
+      std::cout << "No measurements taken for " << name << std::endl;
+    }
+  }
+
+  static void AddNewEntry(const std::string& name) {
+    elapsed_times_.emplace(name, 0);
+    elapsed_counts_.emplace(name, 0);
+  }
+
+ private:
+  uint64_t& total_time_;
+  uint64_t& total_count_;
+  
+  static std::unordered_map<std::string, uint64_t> elapsed_times_;
+  static std::unordered_map<std::string, uint64_t> elapsed_counts_;
+};
+
 class TimerAverage : public TimerInterface {
  public:
   TimerAverage(std::string name = "")
@@ -254,8 +399,8 @@ class TimerAverage : public TimerInterface {
     auto time = it_time->second.load(std::memory_order_relaxed);
     auto count = it_count->second.load(std::memory_order_relaxed);
     if (count != 0) {
-      os << "Average time for " << name << ": "
-         << static_cast<double>(time) / count << " ns" << std::endl;
+      double avg_time = static_cast<double>(time) / count;
+      os << "Average time for " << name << ": " << avg_time << " ns" << std::endl;
       os << "Total count for " << name << ": " << count << std::endl;
     } else {
       std::cout << "No measurements taken for " << name << std::endl;
@@ -439,4 +584,12 @@ class Logger {
 extern void InitStatistics();
 extern void PrintStatistics();
 
+/*
+ * Latency statistics helper functions
+ */
+inline void InitLatencyStatistics() {
+  TimerAverage::AddNewEntry("read_latency");
+  TimerAverage::AddNewEntry("update_latency");
+  TimerAverage::AddNewEntry("insert_latency");
+}
 #endif  // TIMING_H

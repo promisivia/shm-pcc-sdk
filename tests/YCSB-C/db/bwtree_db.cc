@@ -52,27 +52,31 @@ void BwTreeDB::Close() {
 }
 
 int BwTreeDB::PoolThreadInit() {
-  int thread_id = allocate();
+  // int thread_id = allocate();
+  int thread_id = SimThreadInfo::worker_thread_id;
+  // fprintf(stderr, "BwTreeDB::PoolThreadInit: thread_id=%d\n", thread_id);
   tree->AssignGCID(thread_id);
   return thread_id;
 }
 
 void BwTreeDB::PoolThreadClose(int thread_id) {
   tree->UnregisterThread(thread_id);
-  release(thread_id);
+  // release(thread_id);
 }
 
 int BwTreeDB::ThreadInit() {
-  int thread_id = allocate();
+  // int thread_id = allocate();
+  int thread_id = SimThreadInfo::worker_thread_id;
   tree->AssignGCID(thread_id);
   return thread_id;
 }
 
 void BwTreeDB::ThreadClose(int thread_id) {
   tree->UnregisterThread(thread_id);
-  release(thread_id);
+  // release(thread_id);
 }
 
+[[deprecated("Use ReadInternal instead.")]]
 int BwTreeDB::Read(const std::string& table, const std::string& key,
                    const std::vector<std::string>* fields,
                    std::vector<KVPair>& result) {
@@ -108,7 +112,7 @@ int BwTreeDB::Read(const std::string& table, const std::string& key,
 #endif
 }
 
-int BwTreeDB::ReadInternal(uint64_t key, uint64_t &value) {
+int BwTreeDB::ReadInternal(uint64_t key, uintptr_t &value) {
 #ifdef TRX_TYPE_STAT
   read_cnt.fetch_add(1);
 #endif
@@ -118,9 +122,26 @@ int BwTreeDB::ReadInternal(uint64_t key, uint64_t &value) {
     return DB::kErrorNoData;
   }
   value = val[0];
+  // access the real value by address
+  utils::AccessValueByAddress(value);
   return DB::kOK;
 }
 
+int BwTreeDB::ScanInternal(uint64_t key, int len,
+  std::vector<std::vector<KVPair>>& result) {
+  auto element_iterator = tree->Begin(key);
+  for (int i = 0; i < len; i++) {
+    if (element_iterator.IsEnd()) {
+      break;
+    }
+    [[maybe_unused]] auto& element = *element_iterator;
+    result.emplace_back();
+    element_iterator++;
+  }
+  return DB::kOK;
+}
+
+[[deprecated("Use ScanInternal instead.")]]
 int BwTreeDB::Scan(const std::string& table, const std::string& key, int len,
                    const std::vector<std::string>* fields,
                    std::vector<std::vector<KVPair>>& result) {
@@ -176,6 +197,7 @@ int BwTreeDB::Scan(const std::string& table, const std::string& key, int len,
   return DB::kOK;
 }
 
+[[deprecated("Use UpdateInternal instead.")]]
 int BwTreeDB::Update(const std::string& table, const std::string& key,
                      std::vector<KVPair>& values) {
   bool finish = false;
@@ -209,7 +231,7 @@ int BwTreeDB::Update(const std::string& table, const std::string& key,
   #endif
 }
 
-int BwTreeDB::UpdateInternal(uint64_t key, uint64_t value) {
+int BwTreeDB::UpdateInternal(uint64_t key, uintptr_t value) {
 #ifdef TRX_TYPE_STAT
   update_cnt.fetch_add(1);
 #endif
@@ -218,6 +240,7 @@ int BwTreeDB::UpdateInternal(uint64_t key, uint64_t value) {
   return ret;
 }
 
+[[deprecated("Use InsertInternal instead.")]]
 int BwTreeDB::Insert(const std::string& table, const std::string& key,
                      std::vector<KVPair>& values) {
   bool finish = false;
@@ -250,7 +273,7 @@ int BwTreeDB::Insert(const std::string& table, const std::string& key,
   #endif
 }
 
-int BwTreeDB::InsertInternal(uint64_t key, uint64_t value) {
+int BwTreeDB::InsertInternal(uint64_t key, uintptr_t value) {
 #ifdef TRX_TYPE_STAT
   insert_cnt.fetch_add(1);
 #endif
@@ -258,6 +281,7 @@ int BwTreeDB::InsertInternal(uint64_t key, uint64_t value) {
   return ret;
 }
 
+[[deprecated("Use DeleteInternal instead.")]]
 int BwTreeDB::Delete(const std::string& table, const std::string& key) {
   bool finish = false;
   auto task = [this, key, &finish]() {

@@ -1,5 +1,53 @@
+# IDE and Editor files
 .vscode
 .cursor
-memory-bank
-build
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+build_*/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+compile_commands.json
+
+# Cache and temporary files
 .cache
+*.tmp
+*.log
+*.pid
+
+# Environment and configuration files
+.env
+.env.local
+*.local
+
+# Memory bank (project-specific)
+memory-bank
+
+# Test output files
+*.txt
+*.log
+output.txt
+throughput.txt
+metric.txt
+
+# Documentation build
+docs/_build/
+docs/html/
+website/_build/
+website/.venv/
+website/.venv-*/
+
+# SVG files (if generated)
+*.svg
+
+# OS-specific files
+.DS_Store
+Thumbs.db

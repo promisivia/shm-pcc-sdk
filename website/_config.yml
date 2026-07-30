@@ -1,0 +1,147 @@
+# Just the Docs 主题配置 - 多语言支持
+# 这是最流行的开源项目文档模板之一（GitHub Actions, GitHub CLI 等使用）
+
+title: "SHM-PCC-SDK Documentation"
+description: "Comprehensive documentation for SHM-PCC-SDK - A CXL/UB shared memory programming SDK"
+url: "https://promisivia.github.io"
+baseurl: "/shm-pcc-sdk"
+
+# 主题设置
+theme: just-the-docs
+
+# 多语言设置
+languages: ["zh", "en"]
+default_lang: "zh"
+exclude_from_localization: ["assets", "vendor", "node_modules"]
+
+# 插件
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# 搜索设置
+search_enabled: true
+search:
+  heading_level: 2
+
+# 导航设置 - 使用自定义导航文件
+nav_external_links:
+  false
+
+# 导航设置
+aux_links:
+  "GitHub":
+    - "https://github.com/promisivia/shm-pcc-sdk"
+  "Issues":
+    - "https://github.com/promisivia/shm-pcc-sdk/issues"
+
+# 网站信息
+author:
+  name: "SHM-PCC-SDK Team"
+  email: "fangnuowu@gmail.com"
+
+# 社交链接
+social:
+  github: "promisivia/shm-pcc-sdk"
+
+# Markdown 设置
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: true
+
+# 排除文件
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+  - .git
+  - .gitignore
+  - README.md
+  - "*.gemspec"
+  - "*.gem"
+  - INSTALL_RUBY.md
+  - LOCAL_SERVER.md
+  - QUICK_START.md
+  - SETUP.md
+  - MULTILINGUAL.md
+  - MIGRATION.md
+  - update_lang.sh
+  - serve.sh
+  - build.sh
+
+# 包含文件
+include:
+  - "_pages"
+  - "_includes"
+  - "_layouts"
+
+# 集合
+collections:
+  docs:
+    output: true
+    permalink: /:collection/:name/
+  docs_zh:
+    output: true
+    permalink: /zh/:collection/:name/
+  docs_en:
+    output: true
+    permalink: /en/:collection/:name/
+
+# 默认设置
+defaults:
+  - scope:
+      path: ""
+      type: docs
+    values:
+      layout: default
+      search: true
+  - scope:
+      path: "zh"
+      type: docs_zh
+    values:
+      layout: default
+      lang: zh
+  - scope:
+      path: "en"
+      type: docs_en
+    values:
+      layout: default
+      lang: en
+  - scope:
+      path: "en/index.md"
+    values:
+      nav_exclude: true
+  - scope:
+      path: "404.html"
+    values:
+      nav_exclude: true
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+
+# 页脚内容
+footer_content: "Copyright &copy; 2024 SHM-PCC-SDK Team. Distributed under the MIT License."
+
+# 数学支持
+mathjax: true
+mathjax_autoNumber: true
+
+# 目录设置
+toc:
+  heading: 目录
+  title: 页面内容
+
+# 返回顶部按钮
+back_to_top: true
+back_to_top_text: "返回顶部"
+
+# 移动端设置
+mobile_nav: true

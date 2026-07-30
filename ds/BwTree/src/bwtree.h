@@ -40,6 +40,7 @@
 #include <atomic>
 #include <iostream>
 
+#include "shm/mm.h"
 #include "utils/atomic_variable.h"
 #include "utils/config.h"
 #include "utils/timing.h"
@@ -60,8 +61,8 @@
 #define BWTREE_NODEBUG
 
 /*
- * BWTREE_AUTODUMP - 开启自动导出树结构/统计（调试用）
- * 默认关闭，如需开启请在编译命令或此处取消注释
+ * BWTREE_AUTODUMP - Enable automatic tree structure/statistics export (for debugging)
+ * Disabled by default, uncomment in build command or here to enable
  */
 // #define BWTREE_AUTODUMP
 
@@ -642,7 +643,12 @@ protected:
    * resources have been released
    */
   inline void UpdateLastActiveEpoch() {
-    GetCurrentGCMetaData()->last_active_epoch = GetGlobalEpoch();
+    #ifdef PLOAD_GC_STAT
+    TimerAverage timer("pload_gc_stat");
+    timer.Start();
+    GetCurrentGCMetaData()->last_active_epoch.store(GetGlobalEpoch());
+    timer.Stop();
+    #endif
 
     return;
   }
@@ -1203,15 +1209,19 @@ class BwTree : public BwTreeBase {
           current_level{-1},
 
 #endif
-
+          
 #ifdef OPT_IN_USE_FLAG
+          abort_flag{false},
           need_retry_slow_path{false},
           need_retry_half_slow_path{false},
           retrying_slow_path{true}, // should set to true because insert rely on this to access bypass cache
-          is_read_ops{false},
+          is_read_ops{false}
+
+#else
+          abort_flag{false}
 #endif
 
-          abort_flag{false} {
+           {
     }
 
     /*
@@ -2459,7 +2469,7 @@ class BwTree : public BwTreeBase {
         }
       } else {
         const size_t diff = (uint64_t)copy_end_p - (uint64_t)copy_start_p;
-        std::memcpy(End(), copy_start_p, diff);
+        std::memcpy((void *)End(), copy_start_p, diff);
 
         end = (ElementType *)((uint64_t)end + diff);
       }
@@ -2530,12 +2540,15 @@ class BwTree : public BwTreeBase {
      * This is useful since only the low key pointer is available from any
      * type of node
      */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
     static ElasticNode *GetNodeHeader(const KeyNodeIDPair *low_key_p) {
       static constexpr size_t low_key_offset = offsetof(ElasticNode, low_key);
 
       return reinterpret_cast<ElasticNode *>(
           reinterpret_cast<uint64_t>(low_key_p) - low_key_offset);
     }
+#pragma GCC diagnostic pop
 
     /*
      * GetAllocationHeader() - Returns the address of class AllocationHeader
@@ -3558,7 +3571,12 @@ class BwTree : public BwTreeBase {
     assert(node_id != INVALID_NODE_ID);
     assert(node_id < MAPPING_TABLE_SIZE);
     const BaseNode *ret = nullptr;
-
+  #ifdef PLOAD_COMMON_STAT
+    bool is_root_node = (node_id == GetRootID(true));
+    TimerAverage timer_common("pload_common_stat");
+    if (is_root_node)
+      timer_common.Start();
+  #endif
 #ifdef OPT_IN_USE_FLAG
     // bypass_cache == true: should use data in mapping_table and update cache
     // bypass_cache == false: use data in cache
@@ -3569,17 +3587,26 @@ class BwTree : public BwTreeBase {
           ret = mapping_table[node_id].load();
           CatchupLocalCacheMappingTable(node_id, ret);
           assert(ret != nullptr);
+          #ifdef PLOAD_COMMON_STAT
+            timer_common.Stop();
+          #endif
           return ret;
         }
         // if (cached != mapping_table[node_id].load()) {
         //   std::cout << "cached != mapping_table[node_id].load() for node_id " << node_id << std::endl;
         // }
+        #ifdef PLOAD_COMMON_STAT
+          timer_common.Stop();
+        #endif
         return cached;
       } else {    // else, cached is nullptr, meaning that the node is not cached
         // update cache to mapping_table
         ret = mapping_table[node_id].load();
         CatchupLocalCacheMappingTable(node_id, ret);
         assert(ret != nullptr);
+        #ifdef PLOAD_COMMON_STAT
+          timer_common.Stop();
+        #endif
         return ret;
       }
     }
@@ -3587,7 +3614,15 @@ class BwTree : public BwTreeBase {
 
 #ifdef OPT_ROOT_READ
     if (node_id == GetRootID(true)){
-      return (const BaseNode *)GetRootPtr(false);
+      #ifdef PLOAD_ROOT_STAT
+        TimerAverage timer_root("pload_root_stat");
+        timer_root.Start();
+      #endif
+      const BaseNode *root_ptr = (const BaseNode *)GetRootPtr(true);
+      #ifdef PLOAD_ROOT_STAT
+        timer_root.Stop();
+      #endif
+      return root_ptr;
     }
 #endif
 
@@ -3604,6 +3639,11 @@ class BwTree : public BwTreeBase {
     assert(bypass_cache == true);
     GetLocalCacheMappingTable()[node_id].store(ret);
 #endif
+
+  #ifdef PLOAD_COMMON_STAT
+  if (is_root_node)
+    timer_common.Stop();
+  #endif
 
     return ret;
   }
@@ -6190,7 +6230,7 @@ class BwTree : public BwTreeBase {
   void TraverseReadOptimized(Context *context_p,
                              std::vector<ValueType> *value_list_p) {
   std::vector<NodeID> node_id_path;
-  auto print_path = [&]() {
+  [[maybe_unused]] auto print_path = [&]() {
     std::cout << (uint64_t)gettid() << " Node ID path: ";
     for (auto node_id : node_id_path) {
       auto node_p = GetNode(node_id, true);
@@ -8356,8 +8396,13 @@ class BwTree : public BwTreeBase {
 #ifdef BWTREE_RETRY_COUNT
     traverse_counter->Increment();
 #endif
+    // TimerAverage timer("bwtree_read");
+    // timer.Start();
 
+    // TimerAverage timer_gc("bwtree_gc");
+    // timer_gc.Start();
     EpochNode *epoch_node_p = epoch_manager.JoinEpoch();
+    // timer_gc.Stop();
 
     Context context{search_key};
 #ifdef OPT_IN_USE_FLAG
@@ -8365,7 +8410,7 @@ class BwTree : public BwTreeBase {
     context.retrying_slow_path = false;
 #endif
 
-retry_read:
+[[maybe_unused]]retry_read:
     TraverseReadOptimized(&context, &value_list);
 
 #ifdef OPT_IN_USE_FLAG
@@ -8379,7 +8424,11 @@ retry_read:
     }
 #endif
 
+    // timer_gc.Start();
     epoch_manager.LeaveEpoch(epoch_node_p);
+    // timer_gc.Stop();
+
+    // timer.Stop();
 
     return;
   }
@@ -8659,7 +8708,17 @@ retry_read:
      * might take a long time
      */
     EpochManager(BwTree *p_tree_p) : tree_p{p_tree_p} {
-      current_epoch_p = new EpochNode{};
+      // Use cacheable allocator for shared memory support
+      std::cout << "[EpochManager] Allocating EpochNode using cacheable.malloc" << std::endl;
+      std::cout.flush();
+      current_epoch_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      std::cout << "[EpochManager] Allocated EpochNode at " << current_epoch_p << std::endl;
+      std::cout.flush();
+      if (current_epoch_p == nullptr) {
+        std::cerr << "[EpochManager] ERROR: Failed to allocate EpochNode!" << std::endl;
+        throw std::runtime_error("Failed to allocate EpochNode");
+      }
+      new (current_epoch_p) EpochNode{};
 
       // These two are atomic variables but we could
       // simply assign to them
@@ -8783,7 +8842,9 @@ retry_read:
     void CreateNewEpoch() {
       bwt_printf("Creating new epoch...\n");
 
-      EpochNode *epoch_node_p = new EpochNode{};
+      // Use cacheable allocator for shared memory support
+      EpochNode *epoch_node_p = static_cast<EpochNode*>(cacheable.malloc(sizeof(EpochNode)));
+      new (epoch_node_p) EpochNode{};
 
       epoch_node_p->active_thread_count = 0;
       epoch_node_p->garbage_list_p = nullptr;
@@ -8826,7 +8887,12 @@ retry_read:
       EpochNode *epoch_p = current_epoch_p;
 
       // These two could be predetermined
+#ifdef USE_CXL
+      GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+      new (garbage_node_p) GarbageNode{};
+#else
       GarbageNode *garbage_node_p = new GarbageNode;
+#endif
       garbage_node_p->node_p = node_p;
 
       garbage_node_p->next_p = epoch_p->garbage_list_p.load();
@@ -8865,6 +8931,23 @@ retry_read:
       // return are the same one because the current point
       // could change in the middle of this function
       EpochNode *epoch_p = current_epoch_p;
+      
+      // Safety check: ensure epoch_p is valid
+      if (epoch_p == nullptr) {
+        bwt_printf("ERROR: current_epoch_p is nullptr in JoinEpoch()\n");
+        // Return a dummy epoch node or handle error
+        // For now, just return nullptr and let caller handle it
+        return nullptr;
+      }
+      
+      // Add retry limit to prevent infinite loop
+      static thread_local int retry_count = 0;
+      if (retry_count > 1000) {
+        bwt_printf("ERROR: JoinEpoch retry limit exceeded\n");
+        retry_count = 0;
+        return nullptr;
+      }
+      retry_count++;
 
       int64_t prev_count = epoch_p->active_thread_count.fetch_add(1);
 
@@ -8881,9 +8964,15 @@ retry_read:
         // This way the second worker thread actually incremented the epoch
         // counter twice
         epoch_p->active_thread_count.fetch_sub(1);
+        
+        // Small delay to prevent tight loop
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
 
         goto try_join_again;
       }
+      
+      // Reset retry count on success
+      retry_count = 0;
 
 #ifdef BWTREE_DEBUG
       epoch_join.fetch_add(1);
@@ -9210,14 +9299,16 @@ retry_read:
 
           // This invalidates any further reference to its
           // members (so we saved next pointer above)
-          delete garbage_node_p;
+          // Use cacheable.free for shared memory support
+          cacheable.free(const_cast<void*>(static_cast<const void*>(garbage_node_p)));
         }  // for
 
         // First need to save this in order to delete current node
         // safely
         EpochNode *next_epoch_node_p = head_epoch_p->next_p;
 
-        delete head_epoch_p;
+        // Use cacheable.free for shared memory support
+        cacheable.free(static_cast<void*>(head_epoch_p));
 
 #ifdef BWTREE_DEBUG
         epoch_freed++;
@@ -10141,8 +10232,13 @@ retry_read:
    * do not have to worry about thread identity issues
    */
   void AddGarbageNode(const BaseNode *node_p, const NodeID node_id = 0) {
+#ifdef USE_CXL
+    GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
+    new (garbage_node_p) GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id};
+#else
     GarbageNode *garbage_node_p =
         new GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id};
+#endif
     assert(garbage_node_p != nullptr);
 
     // Link this new node to the end of the linked list
@@ -10210,7 +10306,12 @@ retry_read:
       // Then free memory
       epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
 
+#ifdef USE_CXL
+      first_p->~GarbageNode();
+      cacheable.free(first_p);
+#else
       delete first_p;
+#endif
       assert(GetGCMetaData(thread_id)->node_count != 0UL);
       GetGCMetaData(thread_id)->node_count--;
 

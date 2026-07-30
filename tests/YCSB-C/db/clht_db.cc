@@ -246,7 +246,10 @@ int CLHTDB::Insert(uint64_t key, uint64_t value) {
     PoolThreadInit();
     finish_gc_init = true;
   }
-#ifdef USE_MSG_QUEUE
+#ifndef USE_MSG_QUEUE
+  clht_put(this->hashtable, key, value);
+  return DB::kOK;
+#else // if defined USE_MSG_QUEUE
   int finish = false;
   auto task = [this, key, &finish]() {
     clht_put(this->hashtable, key, key);
@@ -270,9 +273,6 @@ int CLHTDB::Insert(uint64_t key, uint64_t value) {
   pool->enqueue(utils::RandomValueNum(), task);
   return DB::kOK;
 #endif
-#else
-  clht_put(this->hashtable, key, value);
-  return DB::kOK;
 #endif
 }
 

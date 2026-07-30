@@ -112,10 +112,13 @@ public:
     // store(nullptr);
   }
 
-  T &operator*() { return *load(memory_order_seq_cst, false); }
-  T *operator->() { return load(memory_order_seq_cst, false); }
-  operator T *() { return load(memory_order_seq_cst, false); }
-  // operator  const T * () { return load(false); }
+  T &operator*() { return *load(); }
+  T *operator->() { return load(); }
+  operator T *() const { return load(); }
+  operator volatile T *() const { return const_cast<volatile T*>(load()); }
+  operator T *() const volatile { return const_cast<nt_pointer*>(this)->load(); }
+  operator volatile T *() const volatile { return const_cast<volatile T*>(const_cast<nt_pointer*>(this)->load()); }
+  // operator  const T * () { return load(); }
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
@@ -123,32 +126,77 @@ public:
   }
 
   nt_pointer &operator=(const nt_pointer &rhs) {
-    store(rhs.load(memory_order_seq_cst, false));
+    store(rhs.load());
     return *this;
   }
 
-  bool operator==(const nt_pointer &rhs) {
-    return load(memory_order_seq_cst, false) ==
-           rhs.load(memory_order_seq_cst, false);
+  bool operator==(const nt_pointer &rhs) const {
+    return load() == rhs.load();
+  }
+  bool operator==(const nt_pointer &rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == const_cast<nt_pointer*>(&rhs)->load();
   }
 
   bool operator==(const T *rhs) const {
-    return load(memory_order_seq_cst, false) == rhs;
+    return load() == rhs;
+  }
+  bool operator==(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
   }
   bool operator!=(const T *rhs) const {
-    return load(memory_order_seq_cst, false) != rhs;
+    return load() != rhs;
+  }
+  bool operator!=(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
   }
   bool operator==(T *rhs) const {
-    return load(memory_order_seq_cst, false) == rhs;
+    return load() == rhs;
+  }
+  bool operator==(T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
   }
   bool operator!=(T *rhs) const {
-    return load(memory_order_seq_cst, false) != rhs;
+    return load() != rhs;
+  }
+  bool operator!=(T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
   }
   bool operator==(std::nullptr_t rhs) const {
-    return load(memory_order_seq_cst, false) == nullptr;
+    return load() == nullptr;
+  }
+  bool operator==(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == nullptr;
   }
   bool operator!=(std::nullptr_t rhs) const {
-    return load(memory_order_seq_cst, false) != nullptr;
+    return load() != nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  // Support for NULL (which may be 0 or 0L)
+  bool operator==(int rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(int rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(int rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(int rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  bool operator==(long rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(long rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(long rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(long rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
   }
 
 private:
@@ -237,11 +285,14 @@ public:
     store(nullptr);
   }
 
-  T &operator*() { return *load(memory_order_seq_cst, false); }
-  T *operator->() { return load(memory_order_seq_cst, false); }
-  operator T *() { return load(memory_order_seq_cst, false); }
-  T &operator[](uint64_t idx) { return load(memory_order_seq_cst, false)[idx]; }
-  T &operator[](int64_t idx) { return load(memory_order_seq_cst, false)[idx]; }
+  T &operator*() { return *load(); }
+  T *operator->() { return load(); }
+  operator T *() const { return load(); }
+  operator volatile T *() const { return const_cast<volatile T*>(load()); }
+  operator T *() const volatile { return const_cast<nt_pointer*>(this)->load(); }
+  operator volatile T *() const volatile { return const_cast<volatile T*>(const_cast<nt_pointer*>(this)->load()); }
+  T &operator[](uint64_t idx) { return load()[idx]; }
+  T &operator[](int64_t idx) { return load()[idx]; }
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
@@ -253,12 +304,60 @@ public:
     return *this;
   }
 
-  bool operator==(const nt_pointer &rhs) {
-    return load(memory_order_seq_cst, false) ==
-           rhs.load(memory_order_seq_cst, memory_order_seq_cst, false);
+  bool operator==(const nt_pointer &rhs) const {
+    return load() == rhs.load();
   }
-  bool operator==(const T *rhs) {
-    return load(memory_order_seq_cst, false) == rhs;
+  bool operator==(const nt_pointer &rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == const_cast<nt_pointer*>(&rhs)->load();
+  }
+  bool operator==(const T *rhs) const {
+    return load() == rhs;
+  }
+  bool operator==(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
+  }
+  bool operator!=(const T *rhs) const {
+    return load() != rhs;
+  }
+  bool operator!=(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
+  }
+  bool operator==(std::nullptr_t rhs) const {
+    return load() == nullptr;
+  }
+  bool operator==(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const {
+    return load() != nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  // Support for NULL (which may be 0 or 0L)
+  bool operator==(int rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(int rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(int rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(int rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  bool operator==(long rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(long rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(long rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(long rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
   }
 
 private:
@@ -329,10 +428,13 @@ public:
     store(nullptr);
   }
 
-  T &operator*() { return *load(memory_order_seq_cst, false); }
-  T *operator->() { return load(memory_order_seq_cst, false); }
-  operator T *() { return load(memory_order_seq_cst, false); }
-  // operator  const T * () { return load(false); }
+  T &operator*() { return *load(); }
+  T *operator->() { return load(); }
+  operator T *() const { return load(); }
+  operator volatile T *() const { return const_cast<volatile T*>(load()); }
+  operator T *() const volatile { return const_cast<nt_pointer*>(this)->load(); }
+  operator volatile T *() const volatile { return const_cast<volatile T*>(const_cast<nt_pointer*>(this)->load()); }
+  // operator  const T * () { return load(); }
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
@@ -340,32 +442,77 @@ public:
   }
 
   nt_pointer &operator=(const nt_pointer &rhs) {
-    store(rhs.load(memory_order_seq_cst, false));
+    store(rhs.load());
     return *this;
   }
 
-  bool operator==(const nt_pointer &rhs) {
-    return load(memory_order_seq_cst, false) ==
-           rhs.load(memory_order_seq_cst, false);
+  bool operator==(const nt_pointer &rhs) const {
+    return load() == rhs.load();
+  }
+  bool operator==(const nt_pointer &rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == const_cast<nt_pointer*>(&rhs)->load();
   }
 
   bool operator==(const T *rhs) const {
-    return load(memory_order_seq_cst, false) == rhs;
+    return load() == rhs;
+  }
+  bool operator==(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
   }
   bool operator!=(const T *rhs) const {
-    return load(memory_order_seq_cst, false) != rhs;
+    return load() != rhs;
+  }
+  bool operator!=(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
   }
   bool operator==(T *rhs) const {
-    return load(memory_order_seq_cst, false) == rhs;
+    return load() == rhs;
+  }
+  bool operator==(T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
   }
   bool operator!=(T *rhs) const {
-    return load(memory_order_seq_cst, false) != rhs;
+    return load() != rhs;
+  }
+  bool operator!=(T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
   }
   bool operator==(std::nullptr_t rhs) const {
-    return load(memory_order_seq_cst, false) == nullptr;
+    return load() == nullptr;
+  }
+  bool operator==(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == nullptr;
   }
   bool operator!=(std::nullptr_t rhs) const {
-    return load(memory_order_seq_cst, false) != nullptr;
+    return load() != nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  // Support for NULL (which may be 0 or 0L)
+  bool operator==(int rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(int rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(int rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(int rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  bool operator==(long rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(long rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(long rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(long rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
   }
 
 private:
@@ -454,11 +601,14 @@ public:
     size = 0;
   }
 
-  T &operator*() { return *load(memory_order_seq_cst, false); }
-  T *operator->() { return load(memory_order_seq_cst, false); }
-  operator T *() { return load(memory_order_seq_cst, false); }
-  T &operator[](uint64_t idx) { return load(memory_order_seq_cst, false)[idx]; }
-  T &operator[](int64_t idx) { return load(memory_order_seq_cst, false)[idx]; }
+  T &operator*() { return *load(); }
+  T *operator->() { return load(); }
+  operator T *() const { return load(); }
+  operator volatile T *() const { return const_cast<volatile T*>(load()); }
+  operator T *() const volatile { return const_cast<nt_pointer*>(this)->load(); }
+  operator volatile T *() const volatile { return const_cast<volatile T*>(const_cast<nt_pointer*>(this)->load()); }
+  T &operator[](uint64_t idx) { return load()[idx]; }
+  T &operator[](int64_t idx) { return load()[idx]; }
 
   nt_pointer &operator=(T *rhs) {
     store(rhs);
@@ -470,12 +620,60 @@ public:
     return *this;
   }
   
-  bool operator==(const nt_pointer &rhs) {
-    return load(memory_order_seq_cst, false) ==
-           rhs.load(memory_order_seq_cst, memory_order_seq_cst, false);
+  bool operator==(const nt_pointer &rhs) const {
+    return load() == rhs.load();
   }
-  bool operator==(const T *rhs) {
-    return load(memory_order_seq_cst, false) == rhs;
+  bool operator==(const nt_pointer &rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == const_cast<nt_pointer*>(&rhs)->load();
+  }
+  bool operator==(const T *rhs) const {
+    return load() == rhs;
+  }
+  bool operator==(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == rhs;
+  }
+  bool operator!=(const T *rhs) const {
+    return load() != rhs;
+  }
+  bool operator!=(const T *rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != rhs;
+  }
+  bool operator==(std::nullptr_t rhs) const {
+    return load() == nullptr;
+  }
+  bool operator==(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const {
+    return load() != nullptr;
+  }
+  bool operator!=(std::nullptr_t rhs) const volatile {
+    return const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  // Support for NULL (which may be 0 or 0L)
+  bool operator==(int rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(int rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(int rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(int rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
+  }
+  bool operator==(long rhs) const {
+    return rhs == 0 && load() == nullptr;
+  }
+  bool operator==(long rhs) const volatile {
+    return rhs == 0 && const_cast<nt_pointer*>(this)->load() == nullptr;
+  }
+  bool operator!=(long rhs) const {
+    return rhs != 0 || load() != nullptr;
+  }
+  bool operator!=(long rhs) const volatile {
+    return rhs != 0 || const_cast<nt_pointer*>(this)->load() != nullptr;
   }
 
 private:

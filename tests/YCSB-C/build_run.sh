@@ -1,12 +1,19 @@
-PASSWORD=ipads123
+#!/usr/bin/env bash
 
+# Get sudo password from environment variable or prompt user
+# Usage: Set SUDO_PASSWORD environment variable, or script will prompt for password
+if [ -z "$SUDO_PASSWORD" ]; then
+    # Prompt for password if not set
+    read -sp "Enter sudo password: " SUDO_PASSWORD
+    echo
+fi
 
 create_symlink() {
     local target_name=$1
     ln -sf build_${target_name}/ycsbc_${target_name} ycsbc
 }
 
-# 测试ORO在不同的CC配置，以及是否有消息队列的情况下的性能（图11）
+# Test ORO performance with different CC configurations and message queue settings (Figure 11)
 task_ycsb_ccconfig_workload_threadcnt_debug() {
     dir=./log/ycsb_ccconfig_workload_threadcnt_debug
     mkdir -p $dir
@@ -18,7 +25,7 @@ task_ycsb_ccconfig_workload_threadcnt_debug() {
 }
 
 # Fig.13 e-h
-# 测试ORO在不同的CC配置，以及是否有消息队列的情况下的性能（图11）
+# Test ORO performance with different CC configurations and message queue settings (Figure 11)
 task_ycsb_ccconfig_workload_threadcnt() {
     dir=./log/ycsb_ccconfig_workload_threadcnt
     mkdir -p $dir
@@ -34,8 +41,8 @@ task_ycsb_ccconfig_workload_threadcnt() {
     done
 }
 
-#Fig.14 b
-# 测试ORO在不同的CC配置，以及是否有消息队列的情况下的性能（图11）
+# Fig.14 b
+# Test ORO performance with different CC configurations and message queue settings (Figure 11)
 task_real_ccconfig_workload() {
     dir=./log/real_ccconfig_workload
     mkdir -p $dir
@@ -89,7 +96,7 @@ task_clevel_ccconfig_workload_threadcnt() {
 }
 
 # Fig.14 a
-# 测试ORO在不同的CC配置，以及是否有消息队列的情况下的性能（图11）
+# Test ORO performance with different CC configurations and message queue settings (Figure 11)
 task_clevel_real_ccconfig_workload() {
     dir=./log/real_clevel_ccconfig_workload
     mkdir -p $dir
@@ -211,7 +218,7 @@ task_super_large_real() {
     done
 }
 
-# 检查当分多个数据库时，不同数据库之间的负载会有多不均衡
+# Check load imbalance when using multiple databases
 task_imbalance_multi_db() {
     dir=./log/imbalance_multi_db
     mkdir -p $dir
@@ -222,29 +229,42 @@ task_imbalance_multi_db() {
     done
 }
 
-# TODO: 1. radix_art_olc 编译有问题 2. clevelhash cc 会挂
+# TODO: 1. radix_art_olc has compilation issues 2. clevelhash cc will hang
 task_latency_overhead() {
     dir=./log/latency_overhead
     mkdir -p $dir
-    configs=("cc" "nocc_no_opt" "nocc")
-    db_types=(
-        "clht"
-        "clevelhash"
-        "bwtree"
-        "btree_olc"
-        "hot"
-        "masstree"
-        "radix_art_olc"
-    )
-    for config in "${configs[@]}"; do
-        for db_type in "${db_types[@]}"; do
-            ./build.sh "${config}"
+    # configs=("lat_cc" "lat_nocc_no_opt" "lat_nocc_no_opt_no_clflush")
+    # configs=("lat_nocc_no_opt_no_clflush")
+    # db_types=("clevelhash" "bwtree")
+    # for config in "${configs[@]}"; do
+    #     ./build.sh "${config}"
+    #     for db_type in "${db_types[@]}"; do
+    #         ./run_shm_ds.sh -mode=latency_overhead -db=${db_type} 2>&1 | tee $dir/${config}_${db_type}.log
+    #     done
+    # done
+    # db_types2=("clht" "btree_olc" "hot" "masstree" "radix_art_olc")
+    db_types2=("clht")
+    # configs2=("lat_cc" "lat_nocc" "lat_nocc_no_clflush")
+    configs2=("lat_nocc_no_opt_no_clflush" "lat_nocc")
+    for config in "${configs2[@]}"; do
+        ./build.sh "${config}"
+        for db_type in "${db_types2[@]}"; do
             ./run_shm_ds.sh -mode=latency_overhead -db=${db_type} 2>&1 | tee $dir/${config}_${db_type}.log
         done
     done
 }
 
-echo $PASSWORD | sudo -S ./prepare_env.sh
+task_various_value_size() {
+    dir=./log/various_value_size
+    mkdir -p $dir
+    configs=("cc" "nocc" "nocc_no_opt" "cc_nocc_mq")
+    for config in "${configs[@]}"; do
+        ./build.sh "${config}"
+        ./run_shm_ds.sh -mode=various-value-size 2>&1 | tee $dir/${config}.log
+    done
+}
+
+echo "$SUDO_PASSWORD" | sudo -S ./prepare_env.sh
 
 # task_msg_queue
 # task_dup_flag
@@ -256,11 +276,12 @@ echo $PASSWORD | sudo -S ./prepare_env.sh
 # task_ycsb_ccconfig_workload_threadcnt
 # task_sherman_ccconfig_workload_threadcnt
 # task_ycsb_ccconfig_workload_threadcnt_debug
-# task_clevel_ccconfig_workload_threadcnt
+task_clevel_ccconfig_workload_threadcnt
 # task_clevel_real_ccconfig_workload
 # task_clevel_breakdown
 # task_bwtree_breakdown
 # task_sherman_indivi
 # task_latency_overhead
+# task_various_value_size
 
-echo $PASSWORD | sudo -S ./reset_env.sh
+echo "$SUDO_PASSWORD" | sudo -S ./reset_env.sh

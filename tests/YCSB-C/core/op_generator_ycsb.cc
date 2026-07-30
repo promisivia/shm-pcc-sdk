@@ -41,7 +41,10 @@ int OpGeneratorYCSB::GenerateReadModifyWrite(cxl_vector<Operation> &ops) {
 int OpGeneratorYCSB::GenerateScan(cxl_vector<Operation> &ops) {
   const std::string &table = workload_->NextTable();
   const std::string &key = workload_->NextTransactionKey();
-  int len = workload_->NextScanLength();
+  int len;
+  do {
+    len = workload_->NextScanLength();
+  } while (len <= 0);
   std::vector<std::vector<DB::KVPair>> result;
   if (!workload_->read_all_fields()) {
     std::vector<std::string> fields;

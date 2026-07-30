@@ -3,6 +3,8 @@
 
 
 #include "hot/commons/PartialKeyMappingBase.hpp"
+#include "utils/atomic_variable.h"
+#include "utils/config.h"
 
 namespace hot { namespace commons {
 
@@ -16,8 +18,13 @@ class alignas(8) SingleMaskPartialKeyMapping : public PartialKeyMappingBase {
 public:
 	static constexpr uint MINIMUM_EXTRACTION_BIT_COUNT_SUPPORTED = 8;
 private:
+// #ifdef NO_CC
+// 	nt<uint32_t> mOffsetInBytes;
+// 	nt<uint64_t> mSuccessiveExtractionMask;
+// #else
 	uint32_t mOffsetInBytes;
 	uint64_t mSuccessiveExtractionMask;
+// #endif
 
 public:
 	inline SingleMaskPartialKeyMapping(SingleMaskPartialKeyMapping const &src);

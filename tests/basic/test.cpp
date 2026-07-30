@@ -256,6 +256,7 @@ enum ALLOC_TYPE {
   UNCACHED_MEM_TEST = 0,
   ALLOC_NUMA_TEST = 1,
   MMAP_NUMA_TEST = 2,
+  MMAP_DEVICE_TEST = 3,
   INVALID_ALLOC_TYPE,
 };
 
@@ -268,7 +269,7 @@ enum CACHE_TYPE {
 
 CACHE_TYPE cache_type;
 ALLOC_TYPE alloc_type;
-size_t map_size = 1024ul * 1024 * 1024; // 默认大小
+size_t map_size = 1024ul * 1024 * 1024; // Default size
 const char *dev_name = "/dev/uncached_mem_dev";
 int ram_numa_node = 4;
 
@@ -307,6 +308,55 @@ void *allocate_memory(size_t size) {
                   MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     }
     break;
+  case MMAP_DEVICE_TEST: {
+    int fd = open(dev_name, O_RDWR);
+    if (fd == -1) {
+      perror("Failed to open device");
+      exit(1);
+    }
+    
+    // Try to get device size (may fail for character devices, but doesn't affect mmap)
+    off_t device_size = lseek(fd, 0, SEEK_END);
+    if (device_size > 0 && (size_t)device_size < size) {
+      fprintf(stderr, "Warning: Device size (%ld) is smaller than requested size (%zu). Using device size.\n", 
+              device_size, size);
+      size = device_size;
+    }
+    lseek(fd, 0, SEEK_SET); // Reset file pointer
+    
+    // DAX devices typically require 2MB alignment, try using larger alignment
+    const size_t dax_align = 2 * 1024 * 1024; // 2MB
+    
+    // Ensure size is at least 2MB aligned (for DAX devices)
+    if (size < dax_align) {
+      size = dax_align;
+    } else {
+      size = (size + dax_align - 1) & ~(dax_align - 1);
+    }
+    
+    // Try using MAP_SYNC (if supported, for DAX devices)
+    int mmap_flags = MAP_SHARED;
+#ifdef MAP_SYNC
+    mmap_flags |= MAP_SYNC;
+#endif
+    
+    addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
+    if (addr == MAP_FAILED) {
+      // If MAP_SYNC fails, try without it
+      if (mmap_flags & MAP_SYNC) {
+        mmap_flags &= ~MAP_SYNC;
+        addr = mmap(NULL, size, PROT_READ | PROT_WRITE, mmap_flags, fd, 0);
+      }
+      if (addr == MAP_FAILED) {
+        perror("mmap device failed");
+        fprintf(stderr, "Attempted to mmap %zu bytes from device %s\n", size, dev_name);
+        close(fd);
+        exit(1);
+      }
+    }
+    close(fd); // File descriptor can be closed after mmap
+    break;
+  }
   default:
     fprintf(stderr, "Unknown memory allocation method: %d\n", alloc_type);
     exit(1);
@@ -369,7 +419,7 @@ void read_hit_test(size_t tsize) {
 
 void write_test(size_t tsize) {
   union CACHELINE *imap = (union CACHELINE *)allocate_memory(map_size);
-  unsigned int value = 0xDEADBEEF; // 初始化写入值
+  unsigned int value = 0xDEADBEEF; // Initialize write value
   struct timespec ts_begin, ts_end;
   clock_gettime(CLOCK_MONOTONIC, &ts_begin);
   for (int repeat = 0; repeat < REPEAT; repeat++) {
@@ -627,7 +677,7 @@ void para_read_test() {
     double max_time = *max_element(times.begin(), times.end());
     // std::cout << "Max time: " << max_time << "ns" << "Average time: " << average_time << "ns" << std::endl;
     double thoughput = (double)(thread_num * total_rept) / (double)(max_time);
-    double average_throughput = (double)(thread_num * total_rept) / (double)(average_time);
+    // double average_throughput = (double)(thread_num * total_rept) / (double)(average_time);
     std::cout << "Average throughput: " << thoughput << "ops/s" << std::endl;
     // std::cout << "Average throughput: " << average_throughput << "ops/s" << std::endl;
   }
@@ -823,6 +873,51 @@ void bank_read_test() {
   }
 }
 
+void clflush_4kb_test(size_t tsize) {
+  const size_t test_size = 4096; // 4KB
+  const size_t num_tests = 4096; // 4096 tests
+  void *mem = allocate_memory(test_size);
+  
+  // Initialize memory
+  memset(mem, 0xAA, test_size);
+  
+  // Store latency for each test (nanoseconds)
+  std::vector<double> latencies;
+  latencies.reserve(num_tests);
+  
+  struct timespec ts_begin, ts_end;
+  
+  // Outer loop: 4096 tests
+  for (size_t i = 0; i < num_tests; ++i) {
+    // Each test: record start time -> execute one clflush -> record end time
+    clock_gettime(CLOCK_MONOTONIC, &ts_begin);
+    // clflush_cache_range(mem, test_size);
+    clflush(mem, test_size, true);
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    
+    // Calculate single latency (nanoseconds)
+    double elapsed = get_elapsed_time(ts_begin, ts_end);
+    double latency_ns = elapsed * 1e9; // Convert to nanoseconds
+    latencies.push_back(latency_ns);
+  }
+  
+  // Calculate average latency
+  double total_latency = 0.0;
+  for (double lat : latencies) {
+    total_latency += lat;
+  }
+  double avg_time_per_op = total_latency / num_tests; // Average latency per operation (nanoseconds)
+  double avg_time_per_byte = avg_time_per_op / test_size; // Cost per byte (nanoseconds)
+  
+  // Calculate total time
+  double total_elapsed = total_latency / 1e9; // Convert to seconds
+  
+  printf("clflush+mfence 4KB test: %fsec, %fns/op, %fns/byte\n", 
+         total_elapsed, avg_time_per_op, avg_time_per_byte);
+  printf("Total operations: %zu, Total bytes flushed: %zu MB\n", 
+         num_tests, (num_tests * test_size) / (1024 * 1024));
+}
+
 void usage(int ac, char **av) {
   printf("Usage: %s <cache_type> <alloc_type> [alloc_option] <test_name>\n",
          av[0]);
@@ -834,9 +929,10 @@ void usage(int ac, char **av) {
   printf("  uncached_mem [device_name]   (default: %s)\n", dev_name);
   printf("  alloc_numa [numa_node]       (default: %d)\n", ram_numa_node);
   printf("  mmap_numa [numa_node]        (default: %d)\n", ram_numa_node);
+  printf("  mmap_device <device_name>    (required: device file path)\n");
   printf("\nTest Names:\n");
   printf("  read_miss, read_hit, write, cas_miss, cas_hit, store_miss, "
-         "store_hit, nt_cas, para_read, para_write, bank_read");
+         "store_hit, nt_cas, para_read, para_write, bank_read, clflush_4kb");
 #ifdef USE_DISAGR_CAS
   printf(",\n  nt_cas_load, disagr_cas_load, disagr_cas_store, disagr_cas");
 #endif
@@ -849,7 +945,7 @@ int parse_argument(int argc, char **argv) {
     usage(argc, argv);
   }
 
-  // 解析 cache_type
+  // Parse cache_type
   if (!strcmp(argv[1], "cached"))
     cache_type = CACHED;
   else if (!strcmp(argv[1], "uncached"))
@@ -863,7 +959,7 @@ int parse_argument(int argc, char **argv) {
 
   int test_name_index = -1;
 
-  // 解析 alloc_type 和相关选项
+  // Parse alloc_type and related options
   const char *current_alloc_type_str = argv[2];
 
   if (!strcmp(current_alloc_type_str, "uncached_mem")) {
@@ -872,6 +968,8 @@ int parse_argument(int argc, char **argv) {
     alloc_type = ALLOC_NUMA_TEST;
   } else if (!strcmp(current_alloc_type_str, "mmap_numa")) {
     alloc_type = MMAP_NUMA_TEST;
+  } else if (!strcmp(current_alloc_type_str, "mmap_device")) {
+    alloc_type = MMAP_DEVICE_TEST;
   } else {
     printf("Invalid alloc_type: %s\n", argv[2]);
     usage(argc, argv);
@@ -898,18 +996,26 @@ int parse_argument(int argc, char **argv) {
       test_name_index = 4;
     }
     break;
+  case MMAP_DEVICE_TEST:
+    if (argc < 5) { // mmap_device requires: prog cache mmap_device device_name test_name
+      printf("mmap_device requires device_name argument.\n");
+      usage(argc, argv);
+    }
+    dev_name = argv[3];
+    test_name_index = 4;
+    break;
   default:
     printf("Invalid alloc_type: %s\n", argv[2]);
     usage(argc, argv);
   }
 
-  // 检查测试名称是否存在
+  // Check if test name exists
   if (test_name_index == -1 || test_name_index >= argc) {
     printf("Missing or invalid test name argument.\n");
     usage(argc, argv);
   }
 
-  return test_name_index; // 返回测试名称的索引
+  return test_name_index; // Return test name index
 }
 
 struct TestEntry {
@@ -918,15 +1024,15 @@ struct TestEntry {
 };
 
 int main(int ac, char **av) {
-  // 解析命令行参数
+  // Parse command line arguments
   int test_name_idx = parse_argument(ac, av);
   auto test_name = std::string(av[test_name_idx]);
 
-  // 打印配置信息
+  // Print configuration information
   printf("Configuration:\n");
   printf("  Cache Type: %s\n", av[1]);
   printf("  Alloc Type: %s\n", av[2]);
-  if (alloc_type == UNCACHED_MEM_TEST) {
+  if (alloc_type == UNCACHED_MEM_TEST || alloc_type == MMAP_DEVICE_TEST) {
     printf("  Device Name: %s\n", dev_name);
   } else if (alloc_type == ALLOC_NUMA_TEST || alloc_type == MMAP_NUMA_TEST) {
     printf("  NUMA Node: %d\n", ram_numa_node);
@@ -934,9 +1040,9 @@ int main(int ac, char **av) {
   printf("  Test Name: %s\n", test_name.c_str());
   printf("----------------------------------------\n");
 
-  int tsize = map_size / sizeof(int); // 注意：tsize 可能需要根据测试调整
+  int tsize = map_size / sizeof(int); // Note: tsize may need adjustment based on test
   pthread_t this_thread = pthread_self();
-  bind_thread_to_cpu(this_thread, 0); // 将主线程绑定到 CPU 0
+  bind_thread_to_cpu(this_thread, 0); // Bind main thread to CPU 0
 
   std::unordered_map<std::string, TestEntry> test_table = {
       {"read_miss", {read_miss_test, nullptr}},
@@ -947,6 +1053,7 @@ int main(int ac, char **av) {
       {"store_miss", {store_miss_test, nullptr}},
       {"store_hit", {store_hit_test, nullptr}},
       {"nt_cas", {nt_cas_test, nullptr}},
+      {"clflush_4kb", {clflush_4kb_test, nullptr}},
 #ifdef USE_DISAGR_CAS
       {"nt_cas_load", {nt_cas_load_test, nullptr}},
       {"disagr_cas_load", {disagr_cas_load_test, nullptr}},

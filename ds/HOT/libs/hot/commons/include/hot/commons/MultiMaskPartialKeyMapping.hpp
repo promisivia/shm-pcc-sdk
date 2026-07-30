@@ -106,8 +106,8 @@ template<unsigned int numberExtractionMasks> inline MultiMaskPartialKeyMapping<n
 )  : MultiMaskPartialKeyMapping(existing)
 {
 	//this is a performance optimization to not call the BaseDiscriminativeBitsRepresentation constructor and use copying
-	mMostSignificantDiscriminativeBitIndex = std::min(mMostSignificantDiscriminativeBitIndex, significantKeyInformation.mAbsoluteBitIndex);
-	mLeastSignificantDiscriminativeBitIndex = std::max(mLeastSignificantDiscriminativeBitIndex, significantKeyInformation.mAbsoluteBitIndex);
+	mMostSignificantDiscriminativeBitIndex = std::min(static_cast<uint16_t>(mMostSignificantDiscriminativeBitIndex), significantKeyInformation.mAbsoluteBitIndex);
+	mLeastSignificantDiscriminativeBitIndex = std::max(static_cast<uint16_t>(mLeastSignificantDiscriminativeBitIndex), significantKeyInformation.mAbsoluteBitIndex);
 
 	uint8_t existingExtractionByte = getExtractionByte(extractionByteIndex);
 	uint8_t newExtractionByte = getExtractionByte(extractionByteIndex) | significantKeyInformation.getExtractionByte();

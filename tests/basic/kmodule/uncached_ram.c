@@ -20,16 +20,24 @@
 #include <linux/numa.h>
 #include <linux/slab.h>
 
+// 1GB = 2^30 bytes = 2^18 pages (assuming 4KB pages)
+#define SZ_1GB (1UL << 30)
+#define PAGES_PER_1GB (SZ_1GB / PAGE_SIZE)
+#define HUGE_PAGE_ORDER_1GB 30  // 2^30 * 4KB = 1GB
+
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("lemonsqueeze");
-MODULE_DESCRIPTION("Map uncached mem to userspace.");
+MODULE_DESCRIPTION("Map uncached mem to userspace with huge pages.");
 MODULE_VERSION("0.1");
 
 static int uncached_mem_numa_node = -1;
+static int use_huge_pages = 1;  // Use huge pages by default
 
 struct buffer {
-  char **pages;
-  size_t page_count;
+  char **pages;  // Store page addresses (normal pages or huge pages)
+  size_t page_count;  // Number of pages (normal page count or huge page count)
+  size_t total_size;  // Total size (bytes)
+  int is_huge_page;  // Whether to use huge pages
 };
 
 struct client {
@@ -66,19 +74,31 @@ struct client {
 
 static void buffer_destroy(struct buffer *buffer) {
   size_t i;
-  printk(KERN_INFO "Freeing pages\n");
+  printk(KERN_INFO "Freeing %s pages (count: %zu)\n", 
+         buffer->is_huge_page ? "huge" : "normal", buffer->page_count);
 
   for (i = 0; i < buffer->page_count; i++) {
     if (buffer->pages[i]) {
       char *addr = buffer->pages[i];
+      struct page *page = virt_to_page(addr);
+      size_t pages_to_wb;
 
-      set_memory_wb((unsigned long)addr, 1);
-      ClearPageReserved(virt_to_page(addr));
-      if (uncached_mem_numa_node == -1) {
-        free_page((unsigned long)addr);
+      if (buffer->is_huge_page) {
+        // Huge page: restore WB mode, in 1GB units
+        pages_to_wb = PAGES_PER_1GB;
+        set_memory_wb((unsigned long)addr, pages_to_wb);
+        ClearPageReserved(page);
+        __free_pages(page, HUGE_PAGE_ORDER_1GB);
       } else {
-        struct page *page = virt_to_page(addr);
-        __free_pages(page, 0);
+        // Normal page
+        pages_to_wb = 1;
+        set_memory_wb((unsigned long)addr, pages_to_wb);
+        ClearPageReserved(page);
+        if (uncached_mem_numa_node == -1) {
+          free_page((unsigned long)addr);
+        } else {
+          __free_pages(page, 0);
+        }
       }
     }
   }
@@ -86,38 +106,99 @@ static void buffer_destroy(struct buffer *buffer) {
   kvfree(buffer->pages);
   buffer->pages = NULL;
   buffer->page_count = 0;
+  buffer->total_size = 0;
 }
 
-static int buffer_alloc(struct buffer *buffer, size_t page_count) {
+static int buffer_alloc(struct buffer *buffer, size_t total_size) {
   size_t i;
+  gfp_t gfp_flags = GFP_KERNEL | __GFP_NOWARN;
+  
+  buffer->total_size = total_size;
+  buffer->is_huge_page = use_huge_pages;
 
-  printk(KERN_INFO "Allocating %zu pages\n", page_count);
-  buffer->page_count = page_count;
-  buffer->pages = kvcalloc(page_count, sizeof(buffer->pages[0]), GFP_KERNEL);
-  if (buffer->pages == NULL) {
-    return -ENOMEM;
-  }
-
-  for (i = 0; i < page_count; i++) {
-    char *addr = NULL;
-    if (uncached_mem_numa_node == -1) {
-      addr = (char *)__get_free_page(GFP_KERNEL);
-    } else {
-      struct page *page =
-          alloc_pages_node(uncached_mem_numa_node, GFP_KERNEL, 0);
-      if (page == NULL)
-        break;
-      addr = page_address(page);
+  if (buffer->is_huge_page) {
+    // Use 1GB huge pages
+    size_t gb_count = (total_size + SZ_1GB - 1) / SZ_1GB;  // Round up
+    
+    printk(KERN_INFO "Allocating %zu 1GB huge pages (total size: %zu bytes)\n", 
+           gb_count, total_size);
+    
+    buffer->page_count = gb_count;
+    buffer->pages = kvcalloc(gb_count, sizeof(buffer->pages[0]), GFP_KERNEL);
+    if (buffer->pages == NULL) {
+      return -ENOMEM;
     }
-    if (addr == NULL)
-      break;
-    buffer->pages[i] = addr;
-    SetPageReserved(virt_to_page(addr));
-    if (set_memory_uc((unsigned long)addr, 1))
-      break;
+
+    for (i = 0; i < gb_count; i++) {
+      struct page *page = NULL;
+      char *addr = NULL;
+      
+      // Allocate 1GB huge page (order = 30)
+      if (uncached_mem_numa_node == -1) {
+        page = alloc_pages(gfp_flags, HUGE_PAGE_ORDER_1GB);
+      } else {
+        page = alloc_pages_node(uncached_mem_numa_node, gfp_flags, 
+                                HUGE_PAGE_ORDER_1GB);
+      }
+      
+      if (page == NULL) {
+        printk(KERN_ERR "Failed to allocate 1GB huge page %zu\n", i);
+        break;
+      }
+      
+      addr = page_address(page);
+      if (addr == NULL) {
+        __free_pages(page, HUGE_PAGE_ORDER_1GB);
+        break;
+      }
+      
+      buffer->pages[i] = addr;
+      SetPageReserved(page);
+      
+      // Set to WC mode, in 1GB units (PAGES_PER_1GB pages)
+      if (set_memory_wc((unsigned long)addr, PAGES_PER_1GB)) {
+        printk(KERN_ERR "Failed to set memory WC for 1GB huge page %zu\n", i);
+        ClearPageReserved(page);
+        __free_pages(page, HUGE_PAGE_ORDER_1GB);
+        break;
+      }
+      
+      printk(KERN_INFO "Allocated 1GB huge page %zu at %p\n", i, addr);
+    }
+  } else {
+    // Use normal 4KB pages
+    size_t page_count = total_size >> PAGE_SHIFT;
+    
+    printk(KERN_INFO "Allocating %zu normal pages (total size: %zu bytes)\n", 
+           page_count, total_size);
+    
+    buffer->page_count = page_count;
+    buffer->pages = kvcalloc(page_count, sizeof(buffer->pages[0]), GFP_KERNEL);
+    if (buffer->pages == NULL) {
+      return -ENOMEM;
+    }
+
+    for (i = 0; i < page_count; i++) {
+      char *addr = NULL;
+      if (uncached_mem_numa_node == -1) {
+        addr = (char *)__get_free_page(GFP_KERNEL);
+      } else {
+        struct page *page =
+            alloc_pages_node(uncached_mem_numa_node, GFP_KERNEL, 0);
+        if (page == NULL)
+          break;
+        addr = page_address(page);
+      }
+      if (addr == NULL)
+        break;
+      buffer->pages[i] = addr;
+      SetPageReserved(virt_to_page(addr));
+      if (set_memory_wc((unsigned long)addr, 1))
+        break;
+    }
   }
 
-  if (i < page_count) {
+  if (i < buffer->page_count) {
     buffer_destroy(buffer);
     return -ENOMEM;
   }
@@ -129,14 +210,37 @@ static int buffer_map_vma(struct buffer *buffer, struct vm_area_struct *vma) {
   unsigned long uaddr;
   size_t i;
   int err;
+  unsigned long remaining_size = buffer->total_size;
 
   uaddr = vma->vm_start;
-  for (i = 0; i < buffer->page_count; i++) {
-    err = vm_insert_page(vma, uaddr, virt_to_page(buffer->pages[i]));
-    if (err)
-      return err;
-
-    uaddr += PAGE_SIZE;
+  
+  if (buffer->is_huge_page) {
+    // Map 1GB huge pages
+    for (i = 0; i < buffer->page_count && remaining_size > 0; i++) {
+      unsigned long map_size = (remaining_size < SZ_1GB) ? remaining_size : SZ_1GB;
+      unsigned long pfn = page_to_pfn(virt_to_page(buffer->pages[i]));
+      
+      // Use remap_pfn_range to map the entire 1GB region (or remaining part)
+      err = remap_pfn_range(vma, uaddr, pfn, map_size, vma->vm_page_prot);
+      if (err) {
+        printk(KERN_ERR "Failed to remap 1GB huge page %zu at %lx (size: %lu)\n", 
+               i, uaddr, map_size);
+        return err;
+      }
+      
+      uaddr += map_size;
+      remaining_size -= map_size;
+    }
+  } else {
+    // Map normal 4KB pages
+    for (i = 0; i < buffer->page_count; i++) {
+      err = vm_insert_page(vma, uaddr, virt_to_page(buffer->pages[i]));
+      if (err) {
+        printk(KERN_ERR "Failed to insert page %zu at %lx\n", i, uaddr);
+        return err;
+      }
+      uaddr += PAGE_SIZE;
+    }
   }
 
   return 0;
@@ -169,7 +273,6 @@ static int device_op_release(struct inode *inode, struct file *file) {
 static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   struct client *client = file->private_data;
   unsigned long size;
-  size_t page_count;
   int ret;
 
   if (!(vma->vm_flags & VM_SHARED))
@@ -180,7 +283,8 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
 
   client->vm_start = vma->vm_start;
   size = vma->vm_end - vma->vm_start;
-  page_count = size >> PAGE_SHIFT;
+  
+  // Size must be a multiple of page size
   if (size & ~PAGE_MASK)
     return -EINVAL;
 
@@ -188,7 +292,13 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   if (client->buffer.pages)
     return -EAGAIN;
 
-  ret = buffer_alloc(&client->buffer, page_count);
+  // If using huge pages, require 1GB alignment (optional, but recommended)
+  if (use_huge_pages && (vma->vm_start & (SZ_1GB - 1))) {
+    printk(KERN_WARNING "vm_start not 1GB aligned: %lx (recommended for huge pages)\n", 
+           vma->vm_start);
+  }
+
+  ret = buffer_alloc(&client->buffer, size);
   if (ret)
     return ret;
 
@@ -199,14 +309,19 @@ static int device_op_mmap(struct file *file, struct vm_area_struct *vma) {
   if (ret)
     goto fail;
 
-  printk(KERN_INFO "uncached ram mmap successful\n");
+  printk(KERN_INFO "uncached ram mmap successful: %lu bytes (%zu %s pages)\n",
+         size, client->buffer.page_count, 
+         client->buffer.is_huge_page ? "1GB huge" : "normal");
   return 0;
 fail:
   buffer_destroy(&client->buffer);
   return ret;
 }
 
-enum { MY_DEVICE_IOCTL_ALLOC_BUFFER = 0 };
+enum { 
+  MY_DEVICE_IOCTL_ALLOC_BUFFER = 0,
+  MY_DEVICE_IOCTL_SET_HUGE_PAGES = 1,
+};
 
 static long device_op_ioctl(struct file *file, unsigned int cmd,
                             unsigned long arg) {
@@ -222,6 +337,10 @@ static long device_op_ioctl(struct file *file, unsigned int cmd,
     }
     uncached_mem_numa_node = arg;
     pr_info("Set numa node to %d\n", uncached_mem_numa_node);
+    break;
+  case MY_DEVICE_IOCTL_SET_HUGE_PAGES:
+    use_huge_pages = (arg != 0) ? 1 : 0;
+    pr_info("Set huge pages mode to %d\n", use_huge_pages);
     break;
   default:
     return -EINVAL;

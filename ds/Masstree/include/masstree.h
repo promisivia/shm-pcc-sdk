@@ -10,6 +10,8 @@
 #include <atomic>
 #include <assert.h>
 #include <emmintrin.h>
+#include <map>
+#include <string>
 #ifdef LOCK_INIT
 #include "tbb/concurrent_vector.h"
 #endif
@@ -113,6 +115,9 @@ class masstree {
         int scan(uint64_t min, int num, uint64_t *buf, MASS::ThreadInfo &threadEpocheInfo);
 
         int scan(char *min, int num, uint64_t *buf, MASS::ThreadInfo &threadEpocheInfo);
+
+        // Statistics function
+        std::pair<size_t, std::map<std::string, double>> getStatistics() const;
 };
 
 class permuter {
@@ -245,7 +250,7 @@ class permuter {
           </ul> */
         void remove(int i) {
             if (int(x_.load(std::memory_order_acquire) & 15) == i + 1)
-            #ifdef NO_CC
+#ifdef NO_CC
               x_.fetch_sub(1);
 #else
               x_.fetch_sub(1, std::memory_order_acq_rel);

@@ -1,0 +1,30 @@
+# 主导航配置
+# Just the Docs 会自动生成导航，这里可以自定义导航顺序
+# 使用 nav_exclude: true 在页面 front matter 中排除不需要的页面
+nav:
+  - title: 首页
+    url: /index.html
+  - title: 用户文档
+    children:
+      - title: 用户指南
+        url: /zh/docs/user-guide.html
+      - title: 环境变量
+        url: /zh/docs/environment-variables.html
+      - title: shm-lib：一步一步创建最小程序
+        url: /zh/docs/shm-lib-step-by-step.html
+      - title: shm-lib func API 参考
+        url: /zh/docs/shm-lib-api.html
+  - title: 开发者文档
+    children:
+      - title: 开发者指南
+        url: /zh/docs/developer-guide.html
+      - title: 贡献指南
+        url: /zh/docs/contributing.html
+  - title: 项目信息
+    children:
+      - title: 路线图
+        url: /zh/docs/roadmap.html
+      - title: 开源检查清单
+        url: /zh/docs/open-source-checklist.html
+      - title: 代码审查与建议
+        url: /zh/docs/code-review.html

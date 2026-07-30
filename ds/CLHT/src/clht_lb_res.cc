@@ -128,53 +128,52 @@ static inline unsigned long read_tsc_local(void)
     return var;
 }
 
-#ifdef PERSIST
-static inline void mfence() {
-    asm volatile("sfence":::"memory");
-}
+// These functions have been defined by us
+// static inline void mfence() {
+//     asm volatile("sfence":::"memory");
+// }
 
-static inline void clflush(char *data, int len, bool front, bool back)
-{
-    volatile char *ptr = (char *)((unsigned long)data &~(CACHE_LINE_SIZE-1));
-    if (front)
-        mfence();
-    for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
-        unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
-#ifdef CLFLUSH
-        asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
-#elif CLFLUSH_OPT
-        asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(ptr)));
-#elif CLWB
-        asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(ptr)));
-#endif
-	    while(read_tsc_local() < etsc) cpu_pause();
-    }
-    if (back)
-        mfence();
-}
+// static inline void clflush(char *data, int len, bool front, bool back)
+// {
+//     volatile char *ptr = (char *)((unsigned long)data &~(CACHE_LINE_SIZE-1));
+//     if (front)
+//         mfence();
+//     for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
+//         unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
+// #ifdef CLFLUSH
+//         asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
+// #elif CLFLUSH_OPT
+//         asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(ptr)));
+// #elif CLWB
+//         asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(ptr)));
+// #endif
+// 	    while(read_tsc_local() < etsc) cpu_pause();
+//     }
+//     if (back)
+//         mfence();
+// }
 
-static inline void clflush_next_check(char *data, int len, bool fence)
-{
-    volatile char *ptr = (char *)((unsigned long)data &~(CACHE_LINE_SIZE-1));
-    if (fence)
-        mfence();
-    for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
-        unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
-#ifdef CLFLUSH
-        asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
-#elif CLFLUSH_OPT
-        asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(ptr)));
-#elif CLWB
-        asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(ptr)));
-#endif
-		if (((bucket_t *)ptr)->next)
-            clflush_next_check((char *)(((bucket_t *)ptr)->next), sizeof(bucket_t), false);
-        while(read_tsc_local() < etsc) cpu_pause();
-    }
-    if (fence)
-        mfence();
-}
-#endif
+// static inline void clflush_next_check(char *data, int len, bool fence)
+// {
+//     volatile char *ptr = (char *)((unsigned long)data &~(CACHE_LINE_SIZE-1));
+//     if (fence)
+//         mfence();
+//     for(; ptr<data+len; ptr+=CACHE_LINE_SIZE){
+//         unsigned long etsc = read_tsc_local() + (unsigned long)(write_latency*CPU_FREQ_MHZ/1000);
+// #ifdef CLFLUSH
+//         asm volatile("clflush %0" : "+m" (*(volatile char *)ptr));
+// #elif CLFLUSH_OPT
+//         asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(ptr)));
+// #elif CLWB
+//         asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(ptr)));
+// #endif
+// 		if (((bucket_t *)ptr)->next)
+//             clflush_next_check((char *)(((bucket_t *)ptr)->next), sizeof(bucket_t), false);
+//         while(read_tsc_local() < etsc) cpu_pause();
+//     }
+//     if (fence)
+//         mfence();
+// }
 
 static inline void movnt64(uint64_t *dest, uint64_t const src, bool front, bool back) {
     assert(((uint64_t)dest & 7) == 0);
@@ -208,8 +207,7 @@ clht_bucket_create()
     bucket->next = NULL;
 
 #ifdef NO_CC
-    clwb((char *)bucket, sizeof(bucket_t));
-    mfence();
+    clflush((char *)bucket, sizeof(bucket_t));
 #endif
 
     return bucket;
@@ -262,14 +260,16 @@ clht_create(uint64_t num_buckets)
     w->data.fields.ht_oldest = w->data.fields.ht;
 
 #ifdef PERSIST
-    clflush((char *)w->data.fields.ht->table, num_buckets * sizeof(bucket_t), false, true);
-    clflush((char *)w->data.fields.ht, sizeof(clht_hashtable_t), false, true);
-    clflush((char *)w, sizeof(clht_t), false, true);
+    clht_hashtable_t* ht = w->data.fields.ht;
+    clflush((char *)ht->table, num_buckets * sizeof(bucket_t), true);
+    clflush((char *)ht, sizeof(clht_hashtable_t), true);
+    clflush((char *)w, sizeof(clht_t), true);
 #endif
 #ifdef NO_CC
-    clwb((char *)w->data.fields.ht->table, num_buckets * sizeof(bucket_t));
-    clwb((char *)w->data.fields.ht, sizeof(clht_hashtable_t));
-    clwb((char *)w, sizeof(clht_t));
+    clht_hashtable_t* ht = w->data.fields.ht.load();
+    clflush((char *)ht->table, num_buckets * sizeof(bucket_t), true);
+    clflush((char *)ht, sizeof(clht_hashtable_t), true);
+    clflush((char *)w, sizeof(clht_t), true);
 #endif
     return w;
 }
@@ -364,44 +364,34 @@ clht_val_t clht_get(clht_hashtable_t* hashtable, clht_addr_t key)
     size_t bin = clht_hash(hashtable, key);
     CLHT_GC_HT_VERSION_USED(hashtable);
     bucket_t* bucket = hashtable->table + bin;
+    // printf("clht_get:\n");
 
     uint32_t j;
     do
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            clht_val_t val = bucket->val[j].load();
-            if (bucket->key[j].load() == key)
-            {
-                if (likely(bucket->val[j].load() == val))
-                {
-                    return val;
-                }
-                else
-                {
-                    return 0;
-                }
-            }
-            #else
             clht_val_t val = bucket->val[j];
+            // printf("load bucket->val[%d];", j);
             if (bucket->key[j] == key)
             {
                 if (likely(bucket->val[j] == val))
                 {
+                    // printf("\n");
                     return val;
                 }
                 else
                 {
+                    // printf("\n");
                     return 0;
                 }
             }
-            #endif
         }
-
+        // printf("load bucket->next;");
         bucket = bucket->next;
     }
     while (unlikely(bucket != NULL));
+    // printf("\n");
     return 0;
 }
 
@@ -413,17 +403,10 @@ bucket_exists(bucket_t* bucket, clht_addr_t key)
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            if (bucket->key[j].load() == key)
-            {
-                return true;
-            }
-            #else
             if (bucket->key[j] == key)
             {
                 return true;
             }
-            #endif
         }
         bucket = bucket->next;
     } 
@@ -437,13 +420,14 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
     clht_hashtable_t* hashtable = h->data.fields.ht;
     size_t bin = clht_hash(hashtable, key);
     bucket_t* bucket = hashtable->table + bin;
-#if CLHT_READ_ONLY_FAIL == 1
-    if (bucket_exists(bucket, key))
-    {   
-        // printf("[%s] %d\n", __func__, __LINE__);
-        return false;
-    }
-#endif
+// #if CLHT_READ_ONLY_FAIL == 1
+//     if (bucket_exists(bucket, key))
+//     {   
+//         // printf("[%s] %d\n", __func__, __LINE__);
+//         return false;
+//     }
+// #endif
+    // printf("clht_put:");
 
     clht_lock_t *lock = &(bucket->lock);
     while (!LOCK_ACQ(lock, hashtable))
@@ -457,36 +441,18 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
     // acquire the lock on the bucket
 #ifdef NO_CC
     clflush((char *)bucket, sizeof(bucket_t));
-    mfence();
 #endif
 
     CLHT_GC_HT_VERSION_USED(hashtable);
     CLHT_CHECK_STATUS(h);
-    #ifdef NO_CC
-    nt<clht_addr_t>* empty = NULL;
-    nt<clht_val_t>* empty_v = NULL;
-    #else
     clht_addr_t* empty = NULL;
     clht_val_t* empty_v = NULL;
-    #endif
 
     uint32_t j;
     do 
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            if (bucket->key[j].load() == key) 
-            {
-                LOCK_RLS(lock);
-                return false;
-            }
-            else if (empty == NULL && bucket->key[j].load() == 0)
-            {
-                empty = (nt<clht_addr_t>*) &bucket->key[j];
-                empty_v = (nt<clht_val_t>*) &bucket->val[j];
-            }
-            #else
             if (bucket->key[j] == key)
             {
                 LOCK_RLS(lock);
@@ -497,7 +463,6 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
                 empty = (clht_addr_t*) &bucket->key[j];
                 empty_v = (clht_val_t*) &bucket->val[j];
             }
-            #endif
         }
 
         int resize = 0;
@@ -508,13 +473,8 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
                 DPP(put_num_failed_expand);
 
                 bucket_t* b = clht_bucket_create_stats(hashtable, &resize);
-                #ifdef NO_CC
-                b->val[0].store(val);
-                b->key[0].store(key);
-                #else
                 b->val[0] = val;
                 b->key[0] = key;
-                #endif
 #ifdef PERSIST
                 clflush((char *)b, sizeof(bucket_t), false, true);
 #endif
@@ -522,23 +482,14 @@ bool clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
             }
             else
             {
-                #ifdef NO_CC
-                empty_v->store(val);
+                *empty_v = val;
 #ifdef PERSIST
                 clflush((char *)empty_v, sizeof(clht_val_t), false, true);
 #endif
-                empty->store(key);
-                #else
-                *empty_v = val;
-                #ifdef PERSIST
-                clflush((char *)empty_v, sizeof(clht_val_t), false, true);
-                #endif
                 *empty = key;
-                #endif
             }
 #ifdef NO_CC
-            clwb((char *)bucket, sizeof(bucket_t));
-            mfence();
+            clflush((char *)bucket, sizeof(bucket_t));
 #endif
             LOCK_RLS(lock);
             if (unlikely(resize))
@@ -592,15 +543,6 @@ clht_val_t clht_remove(clht_t* h, clht_addr_t key)
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            if (bucket->key[j].load() == key)
-            {
-                clht_val_t val = bucket->val[j].load();
-                bucket->key[j].store(emptyMarker);
-                LOCK_RLS(lock);
-                return val;
-            }
-            #else
             if (bucket->key[j] == key)
             {
                 clht_val_t val = bucket->val[j];
@@ -608,7 +550,6 @@ clht_val_t clht_remove(clht_t* h, clht_addr_t key)
                 LOCK_RLS(lock);
                 return val;
             }
-            #endif
         }
         bucket = bucket->next;
     }
@@ -628,21 +569,12 @@ clht_put_seq(clht_hashtable_t* hashtable, clht_addr_t key, clht_val_t val, uint6
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            if (bucket->key[j].load() == 0)
-            {
-                bucket->val[j].store(val);
-                bucket->key[j].store(key);
-                return true;
-            }
-            #else
             if (bucket->key[j] == 0)
             {
                 bucket->val[j] = val;
                 bucket->key[j] = key;
                 return true;
             }
-            #endif
         }
 
         if (bucket->next == NULL)
@@ -650,13 +582,8 @@ clht_put_seq(clht_hashtable_t* hashtable, clht_addr_t key, clht_val_t val, uint6
             DPP(put_num_failed_expand);
             int null;
             bucket->next = clht_bucket_create_stats(hashtable, &null);
-            #ifdef NO_CC
-            bucket->next->val[0].store(val);
-            bucket->next->key[0].store(key);
-            #else
             bucket->next->val[0] = val;
             bucket->next->key[0] = key;
-            #endif
             return true;
         }
 
@@ -678,11 +605,7 @@ bucket_cpy(clht_t* h, bucket_t* bucket, clht_hashtable_t* ht_new)
     {
         for (j = 0; j < ENTRIES_PER_BUCKET; j++)
         {
-            #ifdef NO_CC
-            clht_addr_t key = bucket->key[j].load();
-            #else
             clht_addr_t key = bucket->key[j];
-            #endif
             if (key != 0)
             {
                 uint64_t bin = clht_hash(ht_new, key);
@@ -715,11 +638,7 @@ bucket_cpy(clht_t* h, bucket_t* bucket, clht_hashtable_t* ht_new)
     			}
 #endif
 
-                #ifdef NO_CC
-                clht_put_seq(ht_new, key, bucket->val[j].load(), bin);
-                #else
                 clht_put_seq(ht_new, key, bucket->val[j], bin);
-                #endif
             }
         }
         bucket = bucket->next;
@@ -849,8 +768,8 @@ ht_resize_pes(clht_t* h, int is_increase, int by)
 #endif
 #ifdef NO_CC
     mfence();
-    clwb((char *)ht_new, sizeof(clht_hashtable_t));
-    clwb((char *)ht_new->table, num_buckets_new * sizeof(bucket_t));
+    clflush((char *)ht_new, sizeof(clht_hashtable_t));
+    clflush((char *)ht_new->table, num_buckets_new * sizeof(bucket_t));
     mfence();
 #endif
 
@@ -967,17 +886,10 @@ clht_size(clht_hashtable_t* hashtable)
         {
             for (j = 0; j < ENTRIES_PER_BUCKET; j++)
             {
-                #ifdef NO_CC
-                if (bucket->key[j].load() > 0)
-                {
-                    size++;
-                }
-                #else
                 if (bucket->key[j] > 0)
                 {
                     size++;
                 }
-                #endif
             }
 
             bucket = bucket->next;
@@ -1018,17 +930,10 @@ ht_status(clht_t* h, int resize_increase, int just_print)
             expands++;
             for (j = 0; j < ENTRIES_PER_BUCKET; j++)
             {
-                #ifdef NO_CC
-                if (bucket->key[j].load() > 0)
-                {
-                    size++;
-                }
-                #else
                 if (bucket->key[j] > 0)
                 {
                     size++;
                 }
-                #endif
             }
 
             bucket = bucket->next;
@@ -1139,17 +1044,10 @@ clht_print(clht_hashtable_t* hashtable)
         {
             for (j = 0; j < ENTRIES_PER_BUCKET; j++)
             {
-                #ifdef NO_CC
-                if (bucket->key[j].load())
-                {
-                    printf("(%-5llu/%p)-> ", (long long unsigned int) bucket->key[j].load(), (void*) bucket->val[j].load());
-                }
-                #else
                 if (bucket->key[j] > 0)
                 {
-                    printf("(%-5llu/%p)-> ", (long long unsigned int) bucket->key[j], (void*) bucket->val[j]);
+                    // printf("(%-5llu/%p)-> ", (long long unsigned int) bucket->key[j], (void*) bucket->val[j]);
                 }
-                #endif
             }
 
             bucket = bucket->next;

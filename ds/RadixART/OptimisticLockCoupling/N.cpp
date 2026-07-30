@@ -38,12 +38,16 @@ namespace ART_OLC {
         } else {
             needRestart = true;
         }
+#ifdef NO_CC
+        if (!needRestart) {
+            N::flushNode(const_cast<N*>(this));
+        }
+#endif
     }
 
     void N::writeUnlock() {
-#if defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE)
-        // std::cout << "flushNode" << std::endl;
-        N::flushNode(this);
+#ifdef NO_CC
+        N::flushNode(const_cast<N*>(this));
 #endif
         typeVersionLockObsolete.fetch_add(0b10);
     }
@@ -280,8 +284,8 @@ namespace ART_OLC {
         if (isLocked(version) || isObsolete(version)) {
             needRestart = true;
         }
-#if defined(NO_CC) && !defined(NO_CC_WO_FLUSH_NODE)
-        if (needRestart) { 
+#ifdef NO_CC
+        if (!needRestart) {
             N::flushNode(const_cast<N*>(this));
         }
 #endif
@@ -438,29 +442,34 @@ namespace ART_OLC {
         __builtin_unreachable();
     }
 
+#ifdef NO_CC
     void N::flushNode(N *node) {
+#ifdef NO_CLFLUSH
+        return;
+#endif
         switch (node->getType()) {
             case NTypes::N4: {
                 auto n = static_cast<N4*>(node);
-                n->flush();
+                clflush(n, sizeof(N4), true);
                 break;
             }
             case NTypes::N16: {
                 auto n = static_cast<N16 *>(node);
-                n->flush();
+                clflush(n, sizeof(N16), true);
                 break;
             }
             case NTypes::N48: {
                 auto n = static_cast<N48 *>(node);
-                n->flush();
+                clflush(n, sizeof(N48), true);
                 break;
             }
             case NTypes::N256: {
                 auto n = static_cast<N256 *>(node);
-                n->flush();
+                clflush(n, sizeof(N256), true);
                 break;
             }
         }
         memory_fence();
     }
+#endif
 }

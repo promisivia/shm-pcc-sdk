@@ -25,11 +25,6 @@ template<typename ChildPointerType, template <typename, typename> typename NodeT
 	pointers[0] = binaryNode.mLeft;
 	pointers[1] = binaryNode.mRight;
 
-#ifdef NO_CC
-	hot::commons::NodeAllocationInformation const & allocationInformation =
-        hot::commons::NodeAllocationInformations<NodeTemplate<SingleMaskPartialKeyMapping, uint8_t>>::getAllocationInformation(NUMBER_ENTRIES_IN_TWO_ENTRIES_NODE);
-	clwb(reinterpret_cast<char*>(node), allocationInformation.mTotalSizeInBytes);
-#endif
 	return node;
 };
 

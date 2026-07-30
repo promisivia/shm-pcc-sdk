@@ -41,6 +41,11 @@ inline bool HOTRowexNodeBase::tryLock() {
 			aquiredLock = true;
 		}
 	}
+#ifdef NO_CC
+	if (aquiredLock) {
+		clflush((char *)this, sizeof(HOTRowexNodeBase));
+	}
+#endif
 	return aquiredLock;
 }
 
@@ -49,6 +54,9 @@ inline void HOTRowexNodeBase::markAsObsolete() {
 }
 
 inline void HOTRowexNodeBase::unlock() {
+#ifdef NO_CC
+	clflush((char *)this, sizeof(HOTRowexNodeBase));
+#endif
 	mLock.unlock();
 }
 

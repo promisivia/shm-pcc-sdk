@@ -69,13 +69,19 @@ int Client::TransactionScan(Operation &op, std::atomic<int> &finish, int &return
     cur_element_nr += result.size();
   }
 #else
-  throw "Scan: function not implemented!";
+  uint32_t db_index = get_db(op.key);
+  std::vector<std::vector<DB::KVPair>> result;
+  return db_[db_index]->AsyncScan(op.key, op.len, result, finish, return_value);
 #endif
   return ret;
 }
 
 int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &return_value) {
   int ret;
+  // Statistics for update time in workload tx phase
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -91,6 +97,7 @@ int Client::TransactionUpdate(Operation &op, std::atomic<int> &finish, int &retu
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 
@@ -187,13 +194,19 @@ int Client::TransactionScan(Operation &op) {
     cur_element_nr += result.size();
   }
 #else
-  throw "Scan: function not implemented!";
+  uint32_t db_index = get_db(op.key);
+  std::vector<std::vector<DB::KVPair>> result;
+  return db_[db_index]->ScanInternal(op.key, op.len, result);
 #endif
   return ret;
 }
 
 int Client::TransactionUpdate(Operation &op) {
   int ret;
+  // Statistics for update time in workload tx phase
+  TimerAverage timer_workload("update_workload");
+  timer_workload.Start();
+  
 #ifdef TRX_LATENCY
   TimerAverage timer("update_latency");
   timer.Start();
@@ -201,11 +214,12 @@ int Client::TransactionUpdate(Operation &op) {
 #ifdef YCSB_KEY
   ret = db_[get_db(op.key)]->Update(op.table, op.key, op.value);
 #else
-  ret = db_[get_db(op.key)]->Update(op.key, (uint64_t)op.value);
+  ret = db_[get_db(op.key)]->Update(op.key, (uintptr_t)op.value);
 #endif
 #ifdef TRX_LATENCY
   timer.Stop();
 #endif
+  timer_workload.Stop();
   return ret;
 }
 
