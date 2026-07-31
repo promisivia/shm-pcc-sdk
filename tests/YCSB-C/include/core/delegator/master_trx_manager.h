@@ -61,6 +61,8 @@ public:
     timer_.Start();
 
     trx_thread_controller_->StartExecution();
+    // fprintf(stderr, "master thread sleep for 120 s\n");
+    // std::this_thread::sleep_for(std::chrono::seconds(120));
     trx_thread_controller_->WaitForLocalThreads();
     trx_thread_controller_->CollectResults(sum);
 
