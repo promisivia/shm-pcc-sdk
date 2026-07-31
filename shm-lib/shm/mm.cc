@@ -2,6 +2,7 @@
 #include "shm/memkind.h"
 
 #include "utils/config.h"
+#include <algorithm>
 #include <fcntl.h>
 #include <numa.h>
 #include <stdexcept>
@@ -59,6 +60,9 @@ void ensure_cxlalloc_thread_for_current() {
 #endif
 
 SystemMemoryMmapper::SystemMemoryMmapper(const char *path) : mmap_base(nullptr) {
+  if (path == nullptr || strlen(path) >= sizeof(this->path)) {
+    throw std::invalid_argument("Invalid mmap device path");
+  }
   strcpy(this->path, path);
   fd = open(path, O_RDWR);
   if (fd < 0) {
@@ -82,26 +86,22 @@ void SystemMemoryMmapper::allocate(void *b, size_t s) {
     mmap_base = mmap(0, mmap_size, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
   } else {
-    // Use MAP_SHARED for multi-process shared memory
-    // Use MAP_FIXED if base address is provided to ensure same address space across processes
+    // Use MAP_SHARED for multi-process shared memory. Prefer the non-destructive
+    // fixed-address flag; older kernels receive a hint that is checked below.
     int flags = MAP_SHARED;
     if (b != nullptr) {
-      flags |= MAP_FIXED;
+#ifdef MAP_FIXED_NOREPLACE
+      flags |= MAP_FIXED_NOREPLACE;
+#endif
     }
     mmap_base = mmap(b, mmap_size, PROT_READ | PROT_WRITE, flags, fd, 0);
-    
-    // Debug: Print actual mmap address
-    if (mmap_base != MAP_FAILED) {
-      if (mmap_base != b && b != nullptr) {
-        std::cout << "[SystemMemoryMmapper] WARNING: mmap returned " << mmap_base 
-                  << " instead of requested " << b << std::endl;
-      } else {
-        std::cout << "[SystemMemoryMmapper] mmap succeeded: base=" << mmap_base 
-                  << ", requested=" << b << std::endl;
-      }
+
+    if (mmap_base != MAP_FAILED && b != nullptr && mmap_base != b) {
+      munmap(mmap_base, mmap_size);
+      mmap_base = MAP_FAILED;
     }
   }
-  if( mmap_base == MAP_FAILED) {
+  if (mmap_base == MAP_FAILED) {
     throw std::runtime_error("Failed to mmap.");
   }
 #ifdef ALLOC_REMOTE_MEM
@@ -171,17 +171,9 @@ MemoryManager::MemoryManager(SystemMemoryMmapper *allocator, void *b, size_t s)
   base = allocator->get_mempool_base();
   size = allocator->get_mempool_size();
   
-  // Debug: Print memkind pool base and size
-  std::cout << "[MemoryManager] Creating memkind pool: base=" << base 
-            << ", size=" << size << ", requested_base=" << b << std::endl;
-  
-  // memkind_create_fixed requires the actual mmap base address, not the requested one
-  // If mmap failed to use MAP_FIXED, we need to use the actual mmap address
+  // memkind_create_fixed requires the actual mmap base address.
   void* actual_base = allocator->get_mmap_base();
   if (actual_base != base && actual_base != nullptr) {
-    std::cout << "[MemoryManager] WARNING: mmap base (" << actual_base 
-              << ") differs from requested base (" << b << ")" << std::endl;
-    std::cout << "[MemoryManager] Using actual mmap base for memkind pool" << std::endl;
     base = actual_base;
   }
   
@@ -192,7 +184,6 @@ MemoryManager::MemoryManager(SystemMemoryMmapper *allocator, void *b, size_t s)
     throw std::runtime_error("Failed to create memkind pool.");
   }
   
-  std::cout << "[MemoryManager] Successfully created memkind pool at " << base << std::endl;
 }
 
 MemoryManager::MemoryManager(MemoryManager &&other) noexcept
@@ -259,15 +250,18 @@ void *MemoryManager::malloc(size_t size) {
   }
 #ifdef USE_CXL
   if (memkind_pool == nullptr) {
-    std::cerr << "[MemoryManager::malloc] ERROR: memkind_pool is nullptr!" << std::endl;
-    return ::malloc(size); // Fallback to heap
+    std::cerr << "[MemoryManager::malloc] memkind pool is not initialized\n";
+    return nullptr;
   }
+  // memkind may return nullptr for a zero-byte request. Returning a real pool
+  // allocation keeps allocator/deallocator ownership consistent.
+  size = std::max<size_t>(size, 1);
   void* ptr = memkind_malloc(memkind_pool, size);
   if (ptr == nullptr) {
-    std::cerr << "[MemoryManager::malloc] ERROR: memkind_malloc returned nullptr!" << std::endl;
-    return ::malloc(size); // Fallback to heap
+    std::cerr << "[MemoryManager::malloc] allocation failed for " << size
+              << " bytes\n";
+    return nullptr;
   }
-  // Debug: Check if allocated address is in expected range
   uintptr_t ptr_val = reinterpret_cast<uintptr_t>(ptr);
   uintptr_t base_val = reinterpret_cast<uintptr_t>(base);
   if (ptr_val < base_val || ptr_val >= base_val + this->size) {
@@ -276,13 +270,6 @@ void *MemoryManager::malloc(size_t size) {
               << (void*)((char*)base + this->size) << "]" << std::endl;
     std::cerr << "[MemoryManager::malloc] ptr_val=" << ptr_val 
               << ", base_val=" << base_val << ", size=" << this->size << std::endl;
-  } else {
-    // Only print first few allocations to avoid spam
-    static int alloc_count = 0;
-    if (alloc_count++ < 5) {
-      std::cout << "[MemoryManager::malloc] Allocated " << size << " bytes at " << ptr 
-                << " (in pool range)" << std::endl;
-    }
   }
   return ptr;
 #else

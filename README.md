@@ -148,9 +148,9 @@ cd tests/YCSB-C
 # Build one or more variants; the last build becomes the ./ycsbc symlink.
 ./build.sh cc nocc
 
-# Adjust the shared-memory device and size before running.
-$EDITOR config.ini
-./run_shm_ds.sh -db=bwtree -mode=test
+# Run a small file-backed smoke workload without CXL hardware.
+truncate -s 1G /tmp/cxl-sdk-shm
+./run_shm_ds.sh -db=bwtree -mode=smoke -config=config.local.ini
 ```
 
 Supported database adapters include:
@@ -171,16 +171,16 @@ Common build variants are `cc`, `nocc`, `cc_mq`, `limit_atomic`, `lat_cc`, and
 
 ## Configuration
 
-YCSB-C reads its shared-memory setup from
-[`tests/YCSB-C/config.ini`](tests/YCSB-C/config.ini). The most important fields
-are:
+YCSB-C's [`config.ini`](tests/YCSB-C/config.ini) records the DAX-backed paper
+setup, while [`config.local.ini`](tests/YCSB-C/config.local.ini) provides an
+explicit file-backed smoke configuration. Their most important fields are:
 
 ```ini
 [shm/cacheable]
-mem_type=cxl
-device_path=/dev/shm/cxl-$USER
+mem_type=local
+device_path=/tmp/cxl-sdk-shm
 mmap_base_addr=0xcaffe0000000
-mem_size=32768
+mem_size=1024
 allocator_backend=memkind
 ```
 
@@ -191,6 +191,10 @@ allocator_backend=memkind
 | `mmap_base_addr` | Requested virtual mapping base address |
 | `mem_size` | Region size in MiB |
 | `allocator_backend` | Lower allocator; the public build provides `memkind` |
+
+Real Twitter traces are external inputs. Configure them with `TRACE_PATH` and
+`TRACE_NAME`; the launcher contains no developer-specific dataset paths. See
+the [YCSB-C guide](tests/YCSB-C/README.md) for paper workloads and safety notes.
 
 For multi-process runs, all participants must use compatible mapping addresses,
 region sizes, and shared-memory paths. The launcher may update ASLR settings and

@@ -25,6 +25,9 @@
 #define ALLOC_AND_CONSTRUCT(type, allocator, ...)                              \
   ({                                                                           \
     void *__tmp_addr = (allocator)(sizeof(type));                              \
+    if (__tmp_addr == nullptr) {                                               \
+      throw std::bad_alloc();                                                  \
+    }                                                                          \
     new (__tmp_addr) type(__VA_ARGS__);                                        \
   })
 

@@ -2,7 +2,7 @@
 
 set -e
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}:/usr/local/lib"
 
 db_types=("clht" "clevelhash" "hot" "btree_olc" "bwtree" "masstree" "radix_art_olc")
 DB_TYPE="bwtree"
@@ -14,6 +14,7 @@ CONFIG_TYPE=""
 # ENABLE_CAT=""
 ENABLE_SNIPER=0
 PERF=0
+FLAMEGRAPH_DIR="${FLAMEGRAPH_DIR:-}"
 
 # threads actually do the processing
 SERVER_THREADS_N=144
@@ -22,7 +23,10 @@ CLIENT_THREADS_N=48
 DB_NUM=1
 MACHINE_NR=1
 FOLLOWER_LIST="localhost"
-CONFIG_PATH="config.ini"
+CONFIG_PATH="${CONFIG_PATH:-config.ini}"
+TRACE_PATH="${TRACE_PATH:-}"
+TRACE_NAME="${TRACE_NAME:-2020Mar}"
+DISABLE_ASLR="${DISABLE_ASLR:-0}"
 VALUE_SIZE=8
 
 output_file="output.txt"
@@ -61,6 +65,18 @@ for i in "$@"; do
 		;;
 	-config-type=*)
 		CONFIG_TYPE="${i#*=}"
+		shift
+		;;
+	-config=*)
+		CONFIG_PATH="${i#*=}"
+		shift
+		;;
+	-trace-path=*)
+		TRACE_PATH="${i#*=}"
+		shift
+		;;
+	-trace-name=*)
+		TRACE_NAME="${i#*=}"
 		shift
 		;;
 	*) ;;
@@ -127,10 +143,18 @@ run_cmd() {
 		cmd="run-sniper -c cascade_lake.cfg -n 48 -v --roi -- $cmd"
 	fi
 	if [ "$PERF" = 1 ]; then
+		if [ -z "$FLAMEGRAPH_DIR" ]; then
+			echo "Set FLAMEGRAPH_DIR when PERF=1." >&2
+			return 2
+		fi
 		cmd="perf record -F 99 -g -- $cmd"
 	fi
 
-	echo 0 | sudo tee /proc/sys/kernel/randomize_va_space
+	local original_aslr=""
+	if [ "$DISABLE_ASLR" = 1 ]; then
+		original_aslr=$(cat /proc/sys/kernel/randomize_va_space)
+		echo 0 | sudo tee /proc/sys/kernel/randomize_va_space >/dev/null
+	fi
 
 	# local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
 	# truncate -s 0 $shm_path
@@ -151,34 +175,58 @@ run_cmd() {
         fi
     }
     
-    if [ "$debug" != true ] && [ "$ENABLE_SNIPER" != 1 ]; then
+	local run_status=0
+	set +e
+	if [ "$debug" != true ] && [ "$ENABLE_SNIPER" != 1 ]; then
         while true; do
             run_with_cat "bash -c \"$cmd\""
-            [ $? -eq 124 ] && echo "Command timed out, restarting..." || break
+			run_status=$?
+			[ $run_status -eq 124 ] && echo "Command timed out, restarting..." || break
         done
     else
         run_with_cat "$cmd"
+		run_status=$?
     fi
 
 	if [ "$PERF" = 1 ]; then
 		sudo perf script > out.perf
-		~/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
-		~/FlameGraph/flamegraph.pl out.folded > flamegraph.svg
+		"$FLAMEGRAPH_DIR/stackcollapse-perf.pl" out.perf > out.folded
+		"$FLAMEGRAPH_DIR/flamegraph.pl" out.folded > flamegraph.svg
 		rm -f out.perf out.folded perf.data*
 	fi
 
-	echo 2 | sudo tee /proc/sys/kernel/randomize_va_space
+	if [ -n "$original_aslr" ]; then
+		echo "$original_aslr" | sudo tee /proc/sys/kernel/randomize_va_space >/dev/null
+	fi
+	set -e
+	return "$run_status"
 }
 
 run_ycsbc() {
     local debug=${2:-false}
+	if [ ! -f "workloads/$1" ]; then
+		echo "Missing workload: workloads/$1" >&2
+		return 2
+	fi
     local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\" -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -P \"workloads/$1\" -C $CONFIG_PATH"
     run_cmd "$cmd" $debug
 }
 
+require_trace_dataset() {
+	if [ -z "$TRACE_PATH" ]; then
+		echo "Twitter trace data is external. Set TRACE_PATH or pass -trace-path=/path/to/samples." >&2
+		return 2
+	fi
+	if [ ! -d "$TRACE_PATH/$TRACE_NAME" ]; then
+		echo "Trace directory not found: $TRACE_PATH/$TRACE_NAME" >&2
+		return 2
+	fi
+}
+
 run_real() {
     local debug=${2:-false}
-    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -tracepath \"/disk/cwj/cache-trace/samples\" -tracename \"2020Mar\" -workloadname $1 -C $CONFIG_PATH"
+	require_trace_dataset
+    local cmd="./ycsbc -db \"$DB_TYPE\" -machinenum \"$MACHINE_NR\" -follower_list \"$FOLLOWER_LIST\"  -client_threads \"$CLIENT_THREADS_N\" -server_threads \"$SERVER_THREADS_N\" -dbnum \"$DB_NUM\" -valuesize $VALUE_SIZE -tracepath \"$TRACE_PATH\" -tracename \"$TRACE_NAME\" -workloadname \"$1\" -C \"$CONFIG_PATH\""
     run_cmd "$cmd" $debug
 }
 
@@ -203,6 +251,10 @@ do_real_task() {
 }
 
 case $MODE in 
+"smoke")
+	SERVER_THREADS_N=2
+	run_ycsbc "workloada_small.spec"
+	;;
 "debug")
 	SERVER_THREADS_N=2
 	run_ycsbc "workloada_zipfian.spec" true
@@ -400,19 +452,20 @@ case $MODE in
   done
   ;;
 "run_test3")
+	require_trace_dataset
   type=$CONFIG_TYPE
   for workload in "${real_workloads[@]}"; do
 		PRE_SERVER_THREADS_N=$SERVER_THREADS_N
 		for thread_num in "${thread_nums[@]}"; do
 			SERVER_THREADS_N=$thread_num
-			./ycsbc -db "$DB_TYPE" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "/disk/yjs/cache-trace/samples" -tracename "2020Mar" -workloadname $workload 2>&1 | tee ./log/real/"$workload"_"$type"_"$SERVER_THREADS_N"_"$DB_NUM".log
+			./ycsbc -db "$DB_TYPE" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "$TRACE_PATH" -tracename "$TRACE_NAME" -workloadname "$workload" 2>&1 | tee ./log/real/"$workload"_"$type"_"$SERVER_THREADS_N"_"$DB_NUM".log
 			sleep 1
 		done
 		SERVER_THREADS_N=$PRE_SERVER_THREADS_N
 		PRE_DB_NUM=$DB_NUM
 		for db_num in "${db_nums[@]}"; do
 			DB_NUM=$db_num
-			./ycsbc -db "$DB_TYPE" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "/disk/yjs/cache-trace/samples" -tracename "2020Mar" -workloadname $workload 2>&1 | tee ./log/real/"$workload"_"$type"_"$SERVER_THREADS_N"_"$DB_NUM".log
+			./ycsbc -db "$DB_TYPE" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "$TRACE_PATH" -tracename "$TRACE_NAME" -workloadname "$workload" 2>&1 | tee ./log/real/"$workload"_"$type"_"$SERVER_THREADS_N"_"$DB_NUM".log
 			sleep 1
 		done
 		DB_NUM=$PRE_DB_NUM
@@ -474,8 +527,9 @@ case $MODE in
 	run_real "cluster012" true
 	;;
 "real-benchmark")
+	require_trace_dataset
 	for db_type in "${db_types[@]}"; do
-	./ycsbc -db "$db_type" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "/disk/yjs/cache-trace/samples" -tracename "2020Mar" -workloadname "cluster001"
+	./ycsbc -db "$db_type" -client_threads "$CLIENT_THREADS_N" -server_threads "$SERVER_THREADS_N" -dbnum "$DB_NUM" -tracepath "$TRACE_PATH" -tracename "$TRACE_NAME" -workloadname "cluster001"
 	sleep 5
 	done
 	;;

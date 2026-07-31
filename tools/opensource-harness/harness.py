@@ -250,6 +250,67 @@ def check_documentation_placeholders(harness: Harness, docs: Iterable[Path]) -> 
         harness.pass_("documentation placeholders and branding")
 
 
+def check_paper_traceability(harness: Harness) -> None:
+    required_patterns = {
+        "tests/YCSB-C/CMakeLists.txt": [
+            "NO_CC", "OPT_GC", "OPT_ROOT_READ", "OPT_IN_USE_FLAG",
+            "OPT_REPLICATE_META", "OPT_CLEVEL_ROOT_READ", "QUEUE_SIM_CAS",
+        ],
+        "ds/ClevelHash/clevel_hash.hpp": [
+            "meta_replicas", "help_update->load_ptr", "help_update->cas_ptr",
+        ],
+        "ds/BwTree/src/bwtree.h": [
+            "OPT_ROOT_READ", "cached_root_node_p", "SummarizeGCEpoch2",
+            "OPT_IN_USE_FLAG",
+        ],
+        "shm-lib/include/utils/atomic_queued_variable.h": [
+            "bucket_count = 4096",
+        ],
+        "tests/YCSB-C/include/core/zipfian_generator.h": [
+            "kZipfianConst = 0.99",
+        ],
+        "OPEN_SOURCE_READINESS.md": [
+            "arXiv:2511.06460v1", "§7.4 Ray/P3-Store",
+        ],
+    }
+    findings: list[str] = []
+    for name, patterns in required_patterns.items():
+        path = ROOT / name
+        content = text_content(path) if path.is_file() else None
+        if content is None:
+            findings.append(f"missing or unreadable: {name}")
+            continue
+        for pattern in patterns:
+            if pattern not in content:
+                findings.append(f"{name}: missing evidence '{pattern}'")
+
+    launcher = ROOT / "tests/YCSB-C/run_shm_ds.sh"
+    launcher_content = text_content(launcher) or ""
+    machine_paths = re.findall(r"(?:/home/|/Users/|/disk/)[^\s\"']+", launcher_content)
+    if machine_paths:
+        findings.append("developer-specific launcher paths: " + ", ".join(sorted(set(machine_paths))))
+
+    active_launcher = "\n".join(
+        line for line in launcher_content.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    workload_names = set(re.findall(r"workload[a-z0-9_-]+\.spec", active_launcher))
+    missing_workloads = sorted(
+        name for name in workload_names
+        if not (ROOT / "tests/YCSB-C/workloads" / name).is_file()
+    )
+    if missing_workloads:
+        findings.append("launcher references missing workloads: " + ", ".join(missing_workloads))
+
+    if findings:
+        harness.fail("paper implementation traceability", "\n".join(findings))
+    else:
+        harness.pass_(
+            "paper implementation traceability",
+            "SP, G2/G3, DGC, pCAS simulation, YCSB inputs, and artifact boundaries",
+        )
+
+
 def check_secrets(harness: Harness, files: Iterable[Path]) -> None:
     patterns = [
         re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -347,7 +408,7 @@ def check_paper_index_build(harness: Harness) -> None:
     with tempfile.TemporaryDirectory(prefix="cxl-sdk-ycsb-") as directory:
         configure = run(
             "cmake", "-S", "tests/YCSB-C", "-B", directory,
-            "-DVARIANT=nocc", timeout=240,
+            "-DVARIANT=nocc", "-DBWTREE_MAPPING_TABLE_BITS=16", timeout=240,
         )
         if configure.returncode:
             harness.fail("paper index adapters configure", last_output(configure.stdout))
@@ -358,6 +419,30 @@ def check_paper_index_build(harness: Harness) -> None:
             harness.fail("paper index adapters build", last_output(build_result.stdout))
         else:
             harness.pass_("paper index adapters build", "BTreeOLC, ART, Masstree, BwTree, CLHT, HOT, and ClevelHash")
+            backing = Path(directory) / "cxl-sdk-shm"
+            with backing.open("wb") as stream:
+                stream.truncate(256 * 1024 * 1024)
+            config = Path(directory) / "config.local.ini"
+            config.write_text(
+                (ROOT / "tests/YCSB-C/config.local.ini").read_text(encoding="utf-8")
+                .replace("/tmp/cxl-sdk-shm", str(backing))
+                .replace("mem_size=1024", "mem_size=256"),
+                encoding="utf-8",
+            )
+            smoke_result = run(
+                str(Path(directory) / "ycsbc_nocc"),
+                "-db", "bwtree", "-machinenum", "1",
+                "-follower_list", "localhost", "-client_threads", "1",
+                "-server_threads", "2", "-dbnum", "1", "-valuesize", "8",
+                "-P", str(ROOT / "tests/YCSB-C/workloads/workloada_small.spec"),
+                "-C", str(config), timeout=120,
+            )
+            if smoke_result.returncode:
+                harness.fail("paper NO_CC runtime smoke", last_output(smoke_result.stdout, 60))
+            elif "total operations\t1000" not in smoke_result.stdout:
+                harness.fail("paper NO_CC runtime smoke", "process exited without the expected operation count")
+            else:
+                harness.pass_("paper NO_CC runtime smoke", "BwTree: 1,000 loads + 1,000 mixed operations")
 
 
 def check_g2_stress(harness: Harness) -> None:
@@ -420,6 +505,7 @@ def main() -> int:
     check_tracked_artifacts(harness, files)
     check_markdown_links(harness, docs)
     check_documentation_placeholders(harness, docs)
+    check_paper_traceability(harness)
     check_secrets(harness, files)
     check_shell_syntax(harness)
     check_diff_whitespace(harness)

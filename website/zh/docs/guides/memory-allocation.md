@@ -48,14 +48,14 @@ YCSB 的 `PrepareShmEnv` 是最直接参考：从 ini 配置读取共享内存�
 
 注意：YCSB 里 `mem_size` 的单位是 **MB**（见 `tests/YCSB-C/ycsbc.cc` 注释与换算逻辑）。
 
-### 1.2 `mmap_base_addr` 与 `MAP_FIXED`（多进程共享必读）
+### 1.2 `mmap_base_addr` 与固定地址映射（多进程共享必读）
 
-如果你需要在多个进程之间共享“包含裸指针的对象/数据结构”，通常就要求所有进程把共享内存映射到**相同的虚拟地址**（否则指针在不同进程中会失效）。当前实现里，当 `base != nullptr` 时会启用 `MAP_FIXED`：
+如果你需要在多个进程之间共享“包含裸指针的对象/数据结构”，通常就要求所有进程把共享内存映射到**相同的虚拟地址**（否则指针在不同进程中会失效）。当前实现优先使用 `MAP_FIXED_NOREPLACE`，避免覆盖已有映射；不支持该标志的系统会把地址作为 hint，并在内核返回其他地址时安全失败：
 
 ```{literalinclude} ../../../../shm-lib/shm/mm.cc
 :language: cpp
 :start-after: // Use MAP_SHARED for multi-process shared memory
-:end-before: // Debug: Print actual mmap address
+:end-before: if (mmap_base == MAP_FAILED)
 ```
 
 这也是为什么配置里会有 `mmap_base_addr`：它是“跨进程地址稳定性”的控制旋钮（详见下文第 4 节）。

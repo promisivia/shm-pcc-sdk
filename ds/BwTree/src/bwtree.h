@@ -187,7 +187,12 @@ extern CallCounter* traverse_counter;
 #define MAX_THREAD_COUNT ((int)0x7FFFFFFF)
 
 // The maximum number of nodes we could map in this index
-#define MAPPING_TABLE_SIZE ((size_t)(1 << 24))
+#ifndef BWTREE_MAPPING_TABLE_BITS
+#define BWTREE_MAPPING_TABLE_BITS 24
+#endif
+static_assert(BWTREE_MAPPING_TABLE_BITS >= 10 && BWTREE_MAPPING_TABLE_BITS <= 30,
+              "BWTREE_MAPPING_TABLE_BITS must be between 10 and 30");
+#define MAPPING_TABLE_SIZE ((size_t)(1ULL << BWTREE_MAPPING_TABLE_BITS))
 
 // If the length of delta chain exceeds ( >= ) this then we consolidate the node
 #define INNER_DELTA_CHAIN_LENGTH_THRESHOLD ((int)8)
