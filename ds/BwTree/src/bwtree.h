@@ -643,12 +643,14 @@ protected:
    * resources have been released
    */
   inline void UpdateLastActiveEpoch() {
-    #ifdef PLOAD_GC_STAT
+#ifdef PLOAD_GC_STAT
     TimerAverage timer("pload_gc_stat");
     timer.Start();
+#endif
     GetCurrentGCMetaData()->last_active_epoch.store(GetGlobalEpoch());
+#ifdef PLOAD_GC_STAT
     timer.Stop();
-    #endif
+#endif
 
     return;
   }
