@@ -24,10 +24,9 @@ size_t UNCACHE_SIZE = (size_t)128 * 1024 * 1024;
 void* LOCAL_UNCACHE_BASE;
 static char UNCACHE_DEV[PATH_MAX] = "/dev/uncached_mem_dev";
 
-// size_t QUEUE_SIZE = NUM_CLIENTS * (NUM_CLIENTS - 1) * sizeof(msg_queue_t);
-// size_t TOTAL_QUEUE_SIZE = MSG_TYPE_NUM * QUEUE_SIZE;
-// // size_t TOTAL_QUEUE_SIZE = 3 * QUEUE_SIZE;
-// void* QUEUE_BASE = (char*)GLOBAL_BASE + SHM_TOTAL_SIZE;
+size_t QUEUE_SIZE = NUM_CLIENTS * (NUM_CLIENTS - 1) * sizeof(msg_queue_t);
+size_t TOTAL_QUEUE_SIZE = MSG_TYPE_NUM * QUEUE_SIZE;
+void* QUEUE_BASE = (char*)GLOBAL_BASE + SHM_TOTAL_SIZE;
 
 // static char shm_path[PATH_MAX] =
 // "/sys/bus/pci/devices/0000:00:04.0/resource2";

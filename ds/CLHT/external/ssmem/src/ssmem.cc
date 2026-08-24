@@ -35,6 +35,9 @@
 #include <malloc.h>
 #include <assert.h>
 #include <string.h>
+#ifdef USE_CXL
+#include "shm/mm.h"
+#endif
 
 ssmem_ts_t* ssmem_ts_list = NULL;
 volatile uint32_t ssmem_ts_list_len = 0;

@@ -3,6 +3,8 @@
 #include <numa.h>
 
 #include <cassert>
+#include <cstdlib>
+#include <cstring>
 
 #include "utils/cpu_dist.h"
 #include "utils/timing.h"
@@ -10,11 +12,33 @@
 #include "utils/sim_id.h"
 #include "utils/timing.h"
 #include "db/utils.h"
+#ifdef USE_CXL
+#include "shm/mempool.h"
+#endif
 
 
 namespace ycsbc {
 #ifdef TIMING_LOAD_BALANCE
 int ThreadPool::pool_index = 0;
+#endif
+
+#ifdef USE_CXL
+namespace {
+std::atomic<bool> bwtree_gc_dispatcher_registered{false};
+
+struct BwTreeRemoteGCRequest {
+  TreeType* tree_p;
+  const TreeType::BaseNode* node_p;
+};
+
+void HandleBwTreeRemoteGC(msg_node_t* node, int from) {
+  (void)from;
+  BwTreeRemoteGCRequest request{};
+  memcpy(&request, node->content, sizeof(request));
+  request.tree_p->epoch_manager.FreeEpochDeltaChain(request.node_p);
+  free(node);
+}
+}  // namespace
 #endif
 
 BwTreeDB::BwTreeDB(int thread_num)
@@ -23,8 +47,17 @@ BwTreeDB::BwTreeDB(int thread_num)
   SimThreadInfo::setup_worker_db_id();
 #endif
   if (tree != nullptr) {
-    // Update the GC array
-    tree->UpdateThreadLocal(thread_num);
+#ifdef USE_CXL
+    bool expected = false;
+    if (SimThreadInfo::worker_machine_count > 1 &&
+        bwtree_gc_dispatcher_registered.compare_exchange_strong(expected,
+                                                                 true)) {
+      add_dispatcher(BWTREE_GC, HandleBwTreeRemoteGC);
+    }
+#endif
+    // DBFactory passes one extra slot that is not used by BwTree operations.
+    // Including it in epoch tracking pins min_epoch at 0 and prevents reclaim.
+    tree->UpdateThreadLocal(thread_num - 1);
     for (int i = 0; i < thread_num; ++i) {
       bits[i].store(false);
     }
@@ -330,6 +363,7 @@ void BwTreeDB::GetStats() {
   std::cerr << "Read Count: " << read_cnt.load() << " ";
   std::cerr << "Update Count: " << update_cnt.load() << " ";
   std::cerr << "Insert Count: " << insert_cnt.load() << std::endl;
+  tree->PrintGCStats(std::cerr);
   // std::cerr << "Average GetNode: " << tree->GetTime();
   // tree->reportTimers();
 }

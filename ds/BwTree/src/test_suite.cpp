@@ -10,6 +10,8 @@
 #include "test_suite.h"
 #include "shm/mm.h"
 
+#include <cstdlib>
+
 /*
  * GetEmptyTree() - Return an empty BwTree with proper constructor argument
  *                  in order to finish all tests without problem
@@ -22,13 +24,25 @@ TreeType *GetEmptyTree(bool no_print) {
     print_flag = true;
   }
 
+  const char *gc_flush_env = std::getenv("BWTREE_GC_FLUSH_THREAD");
+  bool enable_gc_flush_thread =
+      gc_flush_env != nullptr && std::atoi(gc_flush_env) != 0;
+
 #ifdef USE_CXL
   void *alloc_base = cacheable.malloc(sizeof(TreeType));
 #else
   void *alloc_base = malloc(sizeof(TreeType));
 #endif
-  TreeType *t1 = new (alloc_base)TreeType{true, KeyComparator{1},
-  KeyEqualityChecker{1}};
+  TreeType *t1 = nullptr;
+  if (enable_gc_flush_thread) {
+    t1 = new (alloc_base)TreeType{true, KeyComparator{1}, KeyEqualityChecker{1},
+                                  std::hash<long int>{},
+                                  std::equal_to<long int>{},
+                                  std::hash<long int>{}, true};
+  } else {
+    t1 = new (alloc_base)TreeType{true, KeyComparator{1},
+    KeyEqualityChecker{1}};
+  }
     // TreeType *t1 = new TreeType{true, KeyComparator{1}, KeyEqualityChecker{1}};
 
 

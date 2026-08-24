@@ -130,12 +130,16 @@ run_cmd() {
 		cmd="perf record -F 99 -g -- $cmd"
 	fi
 
-	echo 0 | sudo tee /proc/sys/kernel/randomize_va_space
+	echo 0 | sudo tee /proc/sys/kernel/randomize_va_space || true
 
-	# local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
-	# truncate -s 0 $shm_path
-	# truncate -s 32G $shm_path
-	# sleep 1
+	local shm_path=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "device_path" )
+	local shm_size_mb=$(get_ini_value "$CONFIG_PATH" "shm/cacheable" "mem_size" )
+	if [ -n "$shm_path" ] && [ -n "$shm_size_mb" ]; then
+		if [ ! -e "$shm_path" ] || [ -f "$shm_path" ]; then
+			truncate -s "${shm_size_mb}M" "$shm_path"
+			sleep 1
+		fi
+	fi
 	echo $cmd
 
 	run_with_cat() {
@@ -167,7 +171,7 @@ run_cmd() {
 		rm -f out.perf out.folded perf.data*
 	fi
 
-	echo 2 | sudo tee /proc/sys/kernel/randomize_va_space
+	echo 2 | sudo tee /proc/sys/kernel/randomize_va_space || true
 }
 
 run_ycsbc() {
@@ -230,6 +234,15 @@ case $MODE in
 		sleep 1
 	done
 	# run_ycsbc "workloada_zipfian.spec"
+	;;
+"ycsb-b-10m")
+	CLIENT_THREADS_N=48
+	thread_nums=(144)
+	for thread_num in "${thread_nums[@]}"; do
+		SERVER_THREADS_N=$thread_num
+		run_ycsbc "workloadb_zipfian_10m.spec"
+		sleep 1
+	done
 	;;
 "test")
 	CLIENT_THREADS_N=48

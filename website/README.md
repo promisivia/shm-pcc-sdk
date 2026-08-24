@@ -1,51 +1,30 @@
 # SHM-PCC-SDK Documentation Website
 
-本站点已切换为 **Sphinx + Read the Docs theme**（风格对齐 NCCL 文档），主要面向 `shm-lib` 的使用者（YCSB / BwTree 等系统开发者）。
+The documentation site is built with Sphinx and the Read the Docs theme. It
+publishes a Chinese site at `/zh/` and an English site at `/en/`; the root URL
+redirects to Chinese.
 
-## 快速开始
-
-### 一键启动（推荐）
-
-```bash
-cd website
-./serve.sh
-```
-
-默认监听 `0.0.0.0:8000`。可用环境变量覆盖：
-
-- `PORT=9000 ./serve.sh`
-- `HOST=127.0.0.1 ./serve.sh`
-- `VENV=.venv-docs ./serve.sh`
-
-### 一键构建
+## Build locally
 
 ```bash
 cd website
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 make html
 ```
 
-构建产物在 `website/_build/html/`。
+The generated site is written to `_build/html/`. Use `./serve.sh` to build it
+and serve it locally on port 8000 by default.
 
-## 目录结构（Sphinx）
+## Source layout
 
-```
+```text
 website/
-  zh/docs/                # 文档源文件（MyST Markdown + conf.py）
-    conf.py
-    index.md
-    guides/
-    api/
-    _static/custom.css
-  tools/gen_func_api.py   # 从 shm-lib/include 自动生成完整 func API
-  requirements.txt
-  Makefile
-  serve.sh
+  zh/docs/  # Chinese Sphinx source
+  en/docs/  # English Sphinx source
 ```
 
-## 写文档的约定
-
-- 尽量使用 `literalinclude` 引用仓库内真实代码片段，避免复制粘贴后过时。
-- `zh/docs/api/func_api.md` 的下半部分为自动生成区；请只在顶部“手写说明区”补充解释。
+Keep the two language trees independently navigable. The function API page in
+`zh/docs/api/func_api.md` has an auto-generated section; refresh it with
+`python tools/gen_func_api.py --repo-root .. --out zh/docs/api/func_api.md`.

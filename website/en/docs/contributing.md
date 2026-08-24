@@ -1,16 +1,4 @@
-lang: en
----
-layout: default
-title: Contributing Guide
-nav_order: 2
-parent: Developer Documentation
-description: Guidelines and instructions for contributing to SHM-PCC-SDK
-lang: en
----
-
 # Contributing to SHM-PCC-SDK
-
-{% include language-switcher.html %}
 
 
 Thank you for your interest in contributing to SHM-PCC-SDK! This document provides guidelines and instructions for contributing.
@@ -188,13 +176,9 @@ Before committing, format your code:
 ```bash
 # If using clang-format
 
-{% include language-switcher.html %}
-
 clang-format -i src/**/*.cpp include/**/*.h
 
 # Or use the project's formatting script
-
-{% include language-switcher.html %}
 
 ./scripts/format.sh
 ```
@@ -229,21 +213,15 @@ clang-format -i src/**/*.cpp include/**/*.h
 ```bash
 # Run all tests
 
-{% include language-switcher.html %}
-
 cd tests
 ./run_all_tests.sh
 
 # Run specific test suite
 
-{% include language-switcher.html %}
-
 cd tests/basic
 ./run_tests.sh
 
 # Run with verbose output
-
-{% include language-switcher.html %}
 
 ./run_tests.sh -v
 ```

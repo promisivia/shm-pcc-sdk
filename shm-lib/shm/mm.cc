@@ -242,6 +242,16 @@ MemoryManager::~MemoryManager() {
   }
 }
 
+bool MemoryManager::owns_memkind_pointer(const void *ptr) const {
+  if (ptr == nullptr || base == nullptr || size == 0) {
+    return false;
+  }
+
+  const auto ptr_val = reinterpret_cast<uintptr_t>(ptr);
+  const auto base_val = reinterpret_cast<uintptr_t>(base);
+  return ptr_val >= base_val && ptr_val < base_val + size;
+}
+
 void *MemoryManager::malloc(size_t size) {
   if (backend_ == CacheableAllocatorBackend::Cxlalloc) {
 #ifdef SHM_LIB_WITH_CXLALLOC
@@ -264,7 +274,8 @@ void *MemoryManager::malloc(size_t size) {
   }
   void* ptr = memkind_malloc(memkind_pool, size);
   if (ptr == nullptr) {
-    std::cerr << "[MemoryManager::malloc] ERROR: memkind_malloc returned nullptr!" << std::endl;
+    std::cerr << "[MemoryManager::malloc] ERROR: memkind_malloc returned nullptr; "
+              << "falling back to heap for " << size << " bytes" << std::endl;
     return ::malloc(size); // Fallback to heap
   }
   // Debug: Check if allocated address is in expected range
@@ -309,7 +320,19 @@ int MemoryManager::posix_memalign(void **memptr, size_t alignment,
 #endif
   }
 #ifdef USE_CXL
-  return memkind_posix_memalign(memkind_pool, memptr, alignment, size);
+  if (memkind_pool != nullptr) {
+    int rc = memkind_posix_memalign(memkind_pool, memptr, alignment, size);
+    if (rc == 0) {
+      return 0;
+    }
+    std::cerr << "[MemoryManager::posix_memalign] ERROR: memkind_posix_memalign "
+              << "failed with " << rc << "; falling back to heap for " << size
+              << " bytes" << std::endl;
+  } else {
+    std::cerr << "[MemoryManager::posix_memalign] ERROR: memkind_pool is nullptr; "
+              << "falling back to heap for " << size << " bytes" << std::endl;
+  }
+  return ::posix_memalign(memptr, alignment, size);
 #else
   return ::posix_memalign(memptr, alignment, size);
 #endif
@@ -332,13 +355,29 @@ int MemoryManager::clalign(void **memptr, size_t size) {
 #endif
   }
 #ifdef USE_CXL
-  return memkind_posix_memalign(memkind_pool, memptr, CACHE_LINE_SIZE, size);
+  if (memkind_pool != nullptr) {
+    int rc = memkind_posix_memalign(memkind_pool, memptr, CACHE_LINE_SIZE, size);
+    if (rc == 0) {
+      return 0;
+    }
+    std::cerr << "[MemoryManager::clalign] ERROR: memkind_posix_memalign "
+              << "failed with " << rc << "; falling back to heap for " << size
+              << " bytes" << std::endl;
+  } else {
+    std::cerr << "[MemoryManager::clalign] ERROR: memkind_pool is nullptr; "
+              << "falling back to heap for " << size << " bytes" << std::endl;
+  }
+  return ::posix_memalign(memptr, CACHE_LINE_SIZE, size);
 #else
   return ::posix_memalign(memptr, CACHE_LINE_SIZE, size);
 #endif
 }
 
 void MemoryManager::free(void *ptr) {
+  if (ptr == nullptr) {
+    return;
+  }
+
   if (backend_ == CacheableAllocatorBackend::Cxlalloc) {
 #ifdef SHM_LIB_WITH_CXLALLOC
     ensure_cxlalloc_thread_for_current();
@@ -347,7 +386,10 @@ void MemoryManager::free(void *ptr) {
     return;
   }
 #ifdef USE_CXL
-  return memkind_free(memkind_pool, ptr);
+  if (memkind_pool != nullptr && owns_memkind_pointer(ptr)) {
+    return memkind_free(memkind_pool, ptr);
+  }
+  return ::free(ptr);
 #else
   return ::free(ptr);
 #endif

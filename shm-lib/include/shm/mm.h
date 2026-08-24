@@ -87,6 +87,8 @@ public:
 
   memkind_t memkind_pool;
 private:
+  bool owns_memkind_pointer(const void *ptr) const;
+
   CacheableAllocatorBackend backend_;
   void *base;
   size_t size;
@@ -109,7 +111,11 @@ public:
     if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
       throw std::bad_alloc();
     }
-    return static_cast<T *>(cacheable.malloc(n * sizeof(T)));
+    T *ptr = static_cast<T *>(cacheable.malloc(n * sizeof(T)));
+    if (ptr == nullptr) {
+      throw std::bad_alloc();
+    }
+    return ptr;
   }
 
   void deallocate(T *p, size_t n) { cacheable.free(p); }

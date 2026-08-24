@@ -9,7 +9,7 @@
 
 #include "utils/compiler.h"
 
-typedef enum msg_type { FREE, LOCK_DELE, MSG_TYPE_NUM } msg_type_t;
+typedef enum msg_type { FREE, LOCK_DELE, BWTREE_GC, MSG_TYPE_NUM } msg_type_t;
 
 struct alignas(CACHE_LINE_SIZE) msg_node {
   size_t length;

@@ -28,6 +28,9 @@
  */
 
 #include "sspfd.h"
+#ifdef USE_CXL
+#include "shm/mm.h"
+#endif
 
 __thread volatile size_t sspfd_num_stores;
 __thread volatile ticks** sspfd_store;

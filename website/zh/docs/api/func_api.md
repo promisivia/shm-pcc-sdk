@@ -65,7 +65,8 @@ _（未发现自由函数声明）_
 
 - `void init_cacheable_allocator(const char *shm_path, void *base, size_t size);`
 - `void init_cxl_cacheable_allocator(const char *shm_path, void *base, size_t size);`
-- `void init_uncacheable_allocator();`
+- `void init_cacheable_allocator_unified(const CacheableInitParams &params);`
+- `void init_uncacheable_allocator(const char *shm_path, void *base, size_t size);`
 
 ## `shm-lib/include/utils/atomic_pointer.h`
 
@@ -149,5 +150,5 @@ _（未发现自由函数声明）_
 
 ## `shm-lib/include/utils/timing.h`
 
-- `extern void InitStatistics();`  *(条件: (COUNTING))*
-- `extern void PrintStatistics();`  *(条件: (COUNTING))*
+- `extern void InitStatistics();`  *(条件: (defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)) && (COUNTING))*
+- `extern void PrintStatistics();`  *(条件: (defined(__x86_64__) || defined(__i386__) || defined(_M_IX86) || defined(_M_X64)) && (COUNTING))*

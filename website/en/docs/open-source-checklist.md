@@ -1,16 +1,4 @@
-lang: en
----
-layout: default
-title: Open Source Checklist
-nav_order: 2
-parent: Project Information
-description: Comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release
-lang: en
----
-
 # Open Source Preparation Checklist
-
-{% include language-switcher.html %}
 
 
 This document provides a comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release.

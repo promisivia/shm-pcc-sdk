@@ -1,15 +1,3 @@
----
-layout: default
-title: User Guide
-nav_order: 1
-parent: User Documentation
-description: Detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting
-lang: en
-permalink: /en/docs/user-guide.html
----
-
-{% include language-switcher.html %}
-
 # User Guide
 
 This document provides detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting.

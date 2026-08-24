@@ -7,6 +7,9 @@
 #include <assert.h>
 #include <iostream>
 #include "Epoche.h"
+#ifdef USE_CXL
+#include "shm/mm.h"
+#endif
 
 using namespace MASS;
 

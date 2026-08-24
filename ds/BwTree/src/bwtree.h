@@ -28,7 +28,9 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <thread>
 #include <unordered_set>
 // offsetof() is defined here
@@ -41,9 +43,17 @@
 #include <iostream>
 
 #include "shm/mm.h"
+#ifdef USE_CXL
+#include "msg/msg_collector.h"
+#include "shm/mempool.h"
+#include "utils/sim_id.h"
+#endif
 #include "utils/atomic_variable.h"
 #include "utils/config.h"
 #include "utils/timing.h"
+#ifdef OPT_ROOT_READ
+#include "replica_help_update/help_update.h"
+#endif
 #include "occ/occ.h"
 
 /*
@@ -119,6 +129,14 @@ using NodeID = uint64_t;
  * USE_OLD_EPOCH - This flag switches between old epoch and new epoch mechanism
  */
 // #define USE_OLD_EPOCH
+
+/*
+ * BWTREE_GC_FLUSH_THREAD_DEFAULT - Enables the dedicated GC flush thread by
+ *                                  default when set to true at compile time.
+ */
+#ifndef BWTREE_GC_FLUSH_THREAD_DEFAULT
+#define BWTREE_GC_FLUSH_THREAD_DEFAULT false
+#endif
 
 /*
  * BWTREE_TEMPLATE_ARGUMENTS - Save some key strokes
@@ -243,11 +261,8 @@ protected:
   class MetaData {
     public:
 #ifdef OPT_ROOT_READ
-    // This is the minimum epoch when the value is updated
     nt<uint64_t> cached_root_id;
-    nt<const void*> cached_root_node_p;
-    MetaData()
-        : cached_root_id { 0UL }, cached_root_node_p { 0UL } {}
+    MetaData() : cached_root_id{0UL} {}
 #endif
   };
 
@@ -279,14 +294,26 @@ protected:
     uint64_t delete_epoch;
     void *node_p;
     NodeID node_id;
+    size_t estimated_bytes;
     GarbageNode *next_p;
 
     /*
      * Constructor
      */
-    GarbageNode(uint64_t p_delete_epoch, void *p_node_p, const NodeID p_node_id) : delete_epoch{p_delete_epoch}, node_p{p_node_p}, node_id{p_node_id}, next_p{nullptr} {}
+    GarbageNode(uint64_t p_delete_epoch, void *p_node_p,
+                const NodeID p_node_id, size_t p_estimated_bytes)
+        : delete_epoch{p_delete_epoch},
+          node_p{p_node_p},
+          node_id{p_node_id},
+          estimated_bytes{p_estimated_bytes},
+          next_p{nullptr} {}
 
-    GarbageNode() : delete_epoch{0UL}, node_p{nullptr}, node_id{0}, next_p{nullptr} {}
+    GarbageNode()
+        : delete_epoch{0UL},
+          node_p{nullptr},
+          node_id{0},
+          estimated_bytes{0},
+          next_p{nullptr} {}
   };
 
   /*
@@ -329,7 +356,10 @@ protected:
      * Default constructor
      */
     GCMetaData()
-        : last_active_epoch{0UL}, header{}, last_p{&header}, node_count{0UL} {}
+        : last_active_epoch{std::numeric_limits<uint64_t>::max()},
+          header{},
+          last_p{&header},
+          node_count{0UL} {}
   };
 
   // Make sure class Data does not exceed one cache line
@@ -520,8 +550,6 @@ protected:
       new (metadata_p + i) PaddedMetadata{};
       reinterpret_cast<PaddedMetadata *>(metadata_p + i)
           ->data.cached_root_id.store(global_root_id.load());
-      // reinterpret_cast<PaddedMetadata *>(metadata_p + i)->data.
-      // cached_root_node_p.store(nullptr);
     }
 #endif
     return;
@@ -576,6 +604,7 @@ protected:
    */
   inline void AssignGCID(int p_gc_id) {
     gc_id = p_gc_id;
+    UpdateLastActiveEpoch();
 
     return;
   }
@@ -2855,12 +2884,18 @@ class BwTree : public BwTreeBase {
    *                     started. Otherwise GC must be done by the user
    *                     using PerformGarbageCollection() interface
    */
+  BwTree(bool start_gc_thread, bool enable_gc_flush_thread)
+      : BwTree(start_gc_thread, KeyComparator{}, KeyEqualityChecker{},
+               KeyHashFunc{}, ValueEqualityChecker{}, ValueHashFunc{},
+               enable_gc_flush_thread) {}
+
   BwTree(bool start_gc_thread = true,
          KeyComparator p_key_cmp_obj = KeyComparator{},
          KeyEqualityChecker p_key_eq_obj = KeyEqualityChecker{},
          KeyHashFunc p_key_hash_obj = KeyHashFunc{},
          ValueEqualityChecker p_value_eq_obj = ValueEqualityChecker{},
-         ValueHashFunc p_value_hash_obj = ValueHashFunc{})
+         ValueHashFunc p_value_hash_obj = ValueHashFunc{},
+         bool enable_gc_flush_thread = BWTREE_GC_FLUSH_THREAD_DEFAULT)
       : BwTreeBase(),
         // Key comparator, equality checker and hasher
         key_cmp_obj{p_key_cmp_obj},
@@ -2900,7 +2935,8 @@ class BwTree : public BwTreeBase {
 #endif
 
         // Epoch Manager that does garbage collection
-        epoch_manager{this} {
+        epoch_manager{this},
+        gc_flush_worker{this, enable_gc_flush_thread} {
     bwt_printf(
         "Bw-Tree Constructor called. "
         "Setting up execution environment...\n");
@@ -2912,6 +2948,9 @@ class BwTree : public BwTreeBase {
 
     InitMappingTable();
     InitNodeLayout();
+#ifdef OPT_ROOT_READ
+    ConfigureRootPointerReplicas();
+#endif
 
     bwt_printf("sizeof(NodeMetaData) = %lu is the overhead for each node\n",
                sizeof(NodeMetaData));
@@ -2947,6 +2986,11 @@ class BwTree : public BwTreeBase {
     delete half_counter;
     delete traverse_counter;
     #endif
+
+#ifdef OPT_ROOT_READ
+    delete root_help_update;
+    root_help_update = nullptr;
+#endif
 
     // Clear all garbage nodes awaiting cleaning
     // First of all it should set all last active epoch counter to -1
@@ -3015,6 +3059,11 @@ class BwTree : public BwTreeBase {
     // 3. Allocate a new array based on the new given size
     // Here all epoches are restored to 0
     PrepareThreadLocal();
+
+#ifdef OPT_ROOT_READ
+    // Root replicas use the same worker-ID indexing as the GC metadata.
+    ConfigureRootPointerReplicas();
+#endif
 
     return;
   }
@@ -3388,24 +3437,50 @@ class BwTree : public BwTreeBase {
 
 
   inline const void *GetRootPtr(bool bypass_cache = BYPASS_CACHE_DEFAULT) {
-    const void *tmp_root_ptr = GetCurrentMetaData()->cached_root_node_p.load(
-        std::memory_order_seq_cst, bypass_cache);
-    if (tmp_root_ptr == nullptr) [[unlikely]] {
-      if (!bypass_cache) {
-        const void *ret = GetCurrentMetaData()->cached_root_node_p.load(
-            std::memory_order_seq_cst, true);
-        if (ret != nullptr) {
-          return ret;
-        }
-      }
-      uint64_t tmp_root_id = global_root_id.load();
-      GetCurrentMetaData()->cached_root_id.store(tmp_root_id);
-      GetCurrentMetaData()->cached_root_node_p.store(
-          mapping_table[tmp_root_id]);
-      return GetCurrentMetaData()->cached_root_node_p.load(
-          std::memory_order_seq_cst, false);
+    (void)bypass_cache;
+    assert(root_help_update != nullptr);
+    assert(gc_id >= 0 && gc_id < static_cast<int>(root_node_replicas.size()));
+    return root_help_update->load_ptr(static_cast<size_t>(gc_id));
+  }
+
+  void ConfigureRootPointerReplicas() {
+    delete root_help_update;
+    root_help_update = nullptr;
+    root_node_replicas.clear();
+    root_node_replicas.resize(thread_num);
+
+    const BaseNode *root_p =
+        mapping_table[global_root_id.load()].load(std::memory_order_seq_cst,
+                                                  true);
+    global_root_node_p.store(const_cast<BaseNode *>(root_p));
+    if (thread_num == 0) {
+      return;
     }
-    return tmp_root_ptr;
+    for (size_t i = 0; i < thread_num; ++i) {
+      root_node_replicas[i].store(const_cast<BaseNode *>(root_p));
+    }
+    root_help_update = new HelpUpdate<BaseNode>(
+        global_root_node_p, root_node_replicas, thread_num);
+  }
+
+  inline void CatchUpRootPointer(NodeID root_node_id) {
+    if (root_help_update == nullptr) {
+      return;
+    }
+
+    // Multiple delta installers may publish out of order. Keep helping until
+    // the replicated pointer reaches the current mapping-table head. If the
+    // root ID changes, the root installer takes over publication.
+    while (global_root_id.load() == root_node_id) {
+      const BaseNode *desired = mapping_table[root_node_id].load(
+          std::memory_order_seq_cst, true);
+      BaseNode *current = root_help_update->load_ptr(
+          static_cast<size_t>(gc_id));
+      if (current == desired) {
+        return;
+      }
+      root_help_update->cas_ptr(current, const_cast<BaseNode *>(desired));
+    }
   }
 #endif
 
@@ -3467,11 +3542,10 @@ class BwTree : public BwTreeBase {
     if (!ret) {
       return ret;
     }
-    if (node_id == GetRootID(false)) {
-      GetCurrentMetaData()->cached_root_node_p.store(node_p);
-      for (size_t i = 0; i < thread_num; i++) {
-        GetMetaData(i)->cached_root_node_p.store(node_p);
-      }
+    // The mapping-table CAS is the node update's linearization point. Catch
+    // the replicas up only while this is still the authoritative root.
+    if (node_id == global_root_id.load()) {
+      CatchUpRootPointer(node_id);
     }
     return ret;
 #else
@@ -3502,15 +3576,16 @@ class BwTree : public BwTreeBase {
       // printf("Root ID is installed by other, catch up root node\n");
       uint64_t tmp_root_id = global_root_id.load();
       GetCurrentMetaData()->cached_root_id.store(tmp_root_id);
-      GetCurrentMetaData()->cached_root_node_p.store(mapping_table[tmp_root_id]);
       return false;
     }
-    // The new root is modified by this thread, so don't have to bypass cache
-    const void *new_ptr =
-        mapping_table[new_root_node_id].load(std::memory_order_seq_cst, false);
+
+    // Publish the new root pointer before exposing its ID through the local
+    // ID replicas. GetNode also validates against global_root_id, so readers
+    // holding the old ID fall back to its mapping-table entry during this
+    // transition instead of pairing it with the new root pointer.
+    CatchUpRootPointer(new_root_node_id);
     for (size_t i = 0; i < thread_num; i++) {
       GetMetaData(i)->cached_root_id.store(new_root_node_id);
-      GetMetaData(i)->cached_root_node_p.store(new_ptr);
     }
     return true;
 #else
@@ -3615,7 +3690,7 @@ class BwTree : public BwTreeBase {
 #endif
 
 #ifdef OPT_ROOT_READ
-    if (node_id == GetRootID(true)){
+    if (node_id == GetRootID(true) && node_id == global_root_id.load()) {
       #ifdef PLOAD_ROOT_STAT
         TimerAverage timer_root("pload_root_stat");
         timer_root.Start();
@@ -3624,7 +3699,9 @@ class BwTree : public BwTreeBase {
       #ifdef PLOAD_ROOT_STAT
         timer_root.Stop();
       #endif
-      return root_ptr;
+      if (node_id == GetRootID(true) && node_id == global_root_id.load()) {
+        return root_ptr;
+      }
     }
 #endif
 
@@ -3895,11 +3972,7 @@ class BwTree : public BwTreeBase {
             global_root_id.load(std::memory_order_seq_cst, true)) {
           bwt_printf("Root node has changed. ABORT\n");
 
-          int tmp_root_id = global_root_id.load();
-          const void *tmp_root_ptr =
-              mapping_table[tmp_root_id].load(std::memory_order_seq_cst, true);
           GetCurrentMetaData()->cached_root_id.store(global_root_id.load(std::memory_order_seq_cst, true));
-          GetCurrentMetaData()->cached_root_node_p.store(tmp_root_ptr);
           context_p->abort_flag = true;
 
           return;
@@ -6844,7 +6917,6 @@ class BwTree : public BwTreeBase {
           uint64_t tmp_root_id = global_root_id.load();
           if (GetRootID() != tmp_root_id) {
             GetCurrentMetaData()->cached_root_id.store(tmp_root_id);
-            GetCurrentMetaData()->cached_root_node_p.store(mapping_table[tmp_root_id]);
             context_p->abort_flag = true;
             return;
           }
@@ -6915,8 +6987,14 @@ class BwTree : public BwTreeBase {
             // Note that the remove node must not be created on inner_node_p
             // since inner_node_p might be destroyed before remove node is
             // destroyed since they are both put into the GC chain
+#ifdef USE_CXL
+            InnerRemoveNode *fake_remove_node_p =
+                static_cast<InnerRemoveNode *>(cacheable.malloc(sizeof(InnerRemoveNode)));
+            new (fake_remove_node_p) InnerRemoveNode{new_root_id, inner_node_p};
+#else
             const InnerRemoveNode *fake_remove_node_p =
                 new InnerRemoveNode{new_root_id, inner_node_p};
+#endif
 
             // Put the remove node into garbage chain, because
             // we cannot call InvalidateNodeID() here
@@ -7296,8 +7374,14 @@ class BwTree : public BwTreeBase {
           // since they are both put into the GC chain, it is possible
           // for new_leaf_node_p to be deleted first and then remove node
           // is deleted
+#ifdef USE_CXL
+          LeafRemoveNode *fake_remove_node_p =
+              static_cast<LeafRemoveNode *>(cacheable.malloc(sizeof(LeafRemoveNode)));
+          new (fake_remove_node_p) LeafRemoveNode{new_node_id, new_leaf_node_p};
+#else
           const LeafRemoveNode *fake_remove_node_p =
               new LeafRemoveNode{new_node_id, new_leaf_node_p};
+#endif
 
           // Must put both of them into GC chain since RemoveNode
           // will not be followed by GC thread
@@ -7346,8 +7430,13 @@ class BwTree : public BwTreeBase {
           return;
         }
 
-        const LeafRemoveNode *remove_node_p =
-            new LeafRemoveNode{node_id, node_p};
+#ifdef USE_CXL
+        LeafRemoveNode *remove_node_p =
+            static_cast<LeafRemoveNode *>(cacheable.malloc(sizeof(LeafRemoveNode)));
+        new (remove_node_p) LeafRemoveNode{node_id, node_p};
+#else
+        const LeafRemoveNode *remove_node_p = new LeafRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7361,7 +7450,12 @@ class BwTree : public BwTreeBase {
         } else {
           bwt_printf("LeafRemoveNode CAS failed\n");
 
+#ifdef USE_CXL
+          remove_node_p->~LeafRemoveNode();
+          cacheable.free(remove_node_p);
+#else
           delete remove_node_p;
+#endif
 
           context_p->abort_flag = true;
 
@@ -7383,8 +7477,6 @@ class BwTree : public BwTreeBase {
         uint64_t tmp_root_id = global_root_id.load();
         if (GetRootID() != tmp_root_id) {
           GetCurrentMetaData()->cached_root_id.store(tmp_root_id);
-          GetCurrentMetaData()->cached_root_node_p.store(
-              mapping_table[tmp_root_id]);
           context_p->abort_flag = true;
           return;
         }
@@ -7455,8 +7547,14 @@ class BwTree : public BwTreeBase {
           // Note that this remove node should be created on existing node
           // rather than on new_inner_node_p, since new_inner_node_p may
           // be destroyed before fake_remove_node_p is destroyed
+#ifdef USE_CXL
+          InnerRemoveNode *fake_remove_node_p =
+              static_cast<InnerRemoveNode *>(cacheable.malloc(sizeof(InnerRemoveNode)));
+          new (fake_remove_node_p) InnerRemoveNode{new_node_id, new_inner_node_p};
+#else
           const InnerRemoveNode *fake_remove_node_p =
               new InnerRemoveNode{new_node_id, new_inner_node_p};
+#endif
 
           epoch_manager.AddGarbageNode(fake_remove_node_p, new_node_id);
           epoch_manager.AddGarbageNode(new_inner_node_p, new_node_id);
@@ -7513,8 +7611,13 @@ class BwTree : public BwTreeBase {
           return;
         }
 
-        const InnerRemoveNode *remove_node_p =
-            new InnerRemoveNode{node_id, node_p};
+#ifdef USE_CXL
+        InnerRemoveNode *remove_node_p =
+            static_cast<InnerRemoveNode *>(cacheable.malloc(sizeof(InnerRemoveNode)));
+        new (remove_node_p) InnerRemoveNode{node_id, node_p};
+#else
+        const InnerRemoveNode *remove_node_p = new InnerRemoveNode{node_id, node_p};
+#endif
 
         bool ret = InstallNodeToReplace(node_id, remove_node_p, node_p);
         if (ret == true) {
@@ -7532,7 +7635,12 @@ class BwTree : public BwTreeBase {
         } else {
           bwt_printf("InnerRemoveNode CAS failed\n");
 
+#ifdef USE_CXL
+          remove_node_p->~InnerRemoveNode();
+          cacheable.free(remove_node_p);
+#else
           delete remove_node_p;
+#endif
 
           // We must abort here since otherwise it might cause
           // merge nodes to underflow
@@ -7613,7 +7721,13 @@ class BwTree : public BwTreeBase {
     *abort_child_node_p_p = parent_node_p;
     *parent_node_id_p = parent_node_id;
 
+#ifdef USE_CXL
+    InnerAbortNode *abort_node_p =
+        static_cast<InnerAbortNode *>(cacheable.malloc(sizeof(InnerAbortNode)));
+    new (abort_node_p) InnerAbortNode{parent_node_p};
+#else
     InnerAbortNode *abort_node_p = new InnerAbortNode{parent_node_p};
+#endif
 
     bool ret =
         InstallNodeToReplace(parent_node_id, abort_node_p, parent_node_p);
@@ -7627,7 +7741,12 @@ class BwTree : public BwTreeBase {
     } else {
       bwt_printf("Inner Abort node CAS failed\n");
 
+#ifdef USE_CXL
+      abort_node_p->~InnerAbortNode();
+      cacheable.free(abort_node_p);
+#else
       delete abort_node_p;
+#endif
     }
 
     return ret;
@@ -8505,6 +8624,332 @@ class BwTree : public BwTreeBase {
  public:
 #endif
 
+  struct GCStats {
+    std::atomic<uint64_t> auto_trigger_count{0};
+    std::atomic<uint64_t> perform_gc_count{0};
+    std::atomic<uint64_t> perform_gc_reclaimable_nodes{0};
+    std::atomic<uint64_t> perform_gc_reclaimable_bytes{0};
+    std::atomic<uint64_t> perform_gc_max_reclaimable_nodes{0};
+    std::atomic<uint64_t> perform_gc_max_reclaimable_bytes{0};
+
+    std::atomic<uint64_t> delayed_nodes_current{0};
+    std::atomic<uint64_t> delayed_nodes_total{0};
+    std::atomic<uint64_t> delayed_nodes_max{0};
+    std::atomic<uint64_t> delayed_bytes_current{0};
+    std::atomic<uint64_t> delayed_bytes_total{0};
+    std::atomic<uint64_t> delayed_bytes_max{0};
+
+    std::atomic<uint64_t> flush_batch_count{0};
+    std::atomic<uint64_t> flush_nodes_total{0};
+    std::atomic<uint64_t> flush_bytes_total{0};
+    std::atomic<uint64_t> flush_ns_total{0};
+    std::atomic<uint64_t> flush_nodes_max{0};
+    std::atomic<uint64_t> flush_bytes_max{0};
+    std::atomic<uint64_t> flush_ns_max{0};
+    std::atomic<uint64_t> flush_1024_batch_count{0};
+    std::atomic<uint64_t> flush_1024_ns_total{0};
+    std::atomic<uint64_t> flush_1024_ns_max{0};
+    std::atomic<uint64_t> flush_1024_bytes_total{0};
+    std::atomic<uint64_t> flush_1024_bytes_max{0};
+  };
+
+  static void AtomicMax(std::atomic<uint64_t> &target, uint64_t value) {
+    uint64_t old = target.load(std::memory_order_relaxed);
+    while (old < value &&
+           !target.compare_exchange_weak(old, value, std::memory_order_relaxed,
+                                         std::memory_order_relaxed)) {
+    }
+  }
+
+  static uint64_t SaturatingSub(std::atomic<uint64_t> &target, uint64_t value) {
+    uint64_t old = target.load(std::memory_order_relaxed);
+    while (true) {
+      const uint64_t next = old > value ? old - value : 0;
+      if (target.compare_exchange_weak(old, next, std::memory_order_relaxed,
+                                       std::memory_order_relaxed)) {
+        return next;
+      }
+    }
+  }
+
+  size_t EstimateGCNodeBytes(const BaseNode *node_p) const {
+    if (node_p == nullptr) {
+      return 0;
+    }
+
+    switch (node_p->GetType()) {
+      case NodeType::LeafInsertType:
+        return sizeof(LeafInsertNode);
+      case NodeType::LeafDeleteType:
+        return sizeof(LeafDeleteNode);
+      case NodeType::LeafSplitType:
+        return sizeof(LeafSplitNode);
+      case NodeType::LeafMergeType:
+        return sizeof(LeafMergeNode);
+      case NodeType::LeafRemoveType:
+        return sizeof(LeafRemoveNode);
+      case NodeType::LeafType:
+        return sizeof(ElasticNode<KeyValuePair>) +
+               sizeof(KeyValuePair) * node_p->GetItemCount() +
+               AllocationMeta::CHUNK_SIZE;
+      case NodeType::InnerInsertType:
+        return sizeof(InnerInsertNode);
+      case NodeType::InnerDeleteType:
+        return sizeof(InnerDeleteNode);
+      case NodeType::InnerSplitType:
+        return sizeof(InnerSplitNode);
+      case NodeType::InnerMergeType:
+        return sizeof(InnerMergeNode);
+      case NodeType::InnerRemoveType:
+        return sizeof(InnerRemoveNode);
+      case NodeType::InnerAbortType:
+        return sizeof(InnerAbortNode);
+      case NodeType::InnerType:
+        return sizeof(ElasticNode<KeyNodeIDPair>) +
+               sizeof(KeyNodeIDPair) * node_p->GetItemCount() +
+               AllocationMeta::CHUNK_SIZE;
+      default:
+        return sizeof(BaseNode);
+    }
+  }
+
+  void RecordDelayedGCBytes(size_t bytes) {
+    gc_stats.delayed_nodes_total.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t current_nodes =
+        gc_stats.delayed_nodes_current.fetch_add(1, std::memory_order_relaxed) +
+        1;
+    AtomicMax(gc_stats.delayed_nodes_max, current_nodes);
+
+    gc_stats.delayed_bytes_total.fetch_add(bytes, std::memory_order_relaxed);
+    const uint64_t current_bytes =
+        gc_stats.delayed_bytes_current.fetch_add(bytes,
+                                                 std::memory_order_relaxed) +
+        bytes;
+    AtomicMax(gc_stats.delayed_bytes_max, current_bytes);
+  }
+
+  void RecordReleasedGCBytes(size_t bytes) {
+    SaturatingSub(gc_stats.delayed_nodes_current, 1);
+    SaturatingSub(gc_stats.delayed_bytes_current, bytes);
+  }
+
+  void RecordGCTriggerStats(uint64_t reclaimable_nodes,
+                            uint64_t reclaimable_bytes) {
+    gc_stats.perform_gc_count.fetch_add(1, std::memory_order_relaxed);
+    gc_stats.perform_gc_reclaimable_nodes.fetch_add(
+        reclaimable_nodes, std::memory_order_relaxed);
+    gc_stats.perform_gc_reclaimable_bytes.fetch_add(
+        reclaimable_bytes, std::memory_order_relaxed);
+    AtomicMax(gc_stats.perform_gc_max_reclaimable_nodes, reclaimable_nodes);
+    AtomicMax(gc_stats.perform_gc_max_reclaimable_bytes, reclaimable_bytes);
+  }
+
+  void RecordGCFlushStats(uint64_t nodes, uint64_t bytes, uint64_t elapsed_ns) {
+    gc_stats.flush_batch_count.fetch_add(1, std::memory_order_relaxed);
+    gc_stats.flush_nodes_total.fetch_add(nodes, std::memory_order_relaxed);
+    gc_stats.flush_bytes_total.fetch_add(bytes, std::memory_order_relaxed);
+    gc_stats.flush_ns_total.fetch_add(elapsed_ns, std::memory_order_relaxed);
+    AtomicMax(gc_stats.flush_nodes_max, nodes);
+    AtomicMax(gc_stats.flush_bytes_max, bytes);
+    AtomicMax(gc_stats.flush_ns_max, elapsed_ns);
+    if (nodes == GC_NODE_COUNT_THREADHOLD) {
+      gc_stats.flush_1024_batch_count.fetch_add(1, std::memory_order_relaxed);
+      gc_stats.flush_1024_ns_total.fetch_add(elapsed_ns,
+                                             std::memory_order_relaxed);
+      gc_stats.flush_1024_bytes_total.fetch_add(bytes,
+                                                std::memory_order_relaxed);
+      AtomicMax(gc_stats.flush_1024_ns_max, elapsed_ns);
+      AtomicMax(gc_stats.flush_1024_bytes_max, bytes);
+    }
+  }
+
+ public:
+  void PrintGCStats(std::ostream &os) const {
+    const uint64_t perform_count =
+        gc_stats.perform_gc_count.load(std::memory_order_relaxed);
+    const uint64_t reclaimable_nodes =
+        gc_stats.perform_gc_reclaimable_nodes.load(std::memory_order_relaxed);
+    const uint64_t reclaimable_bytes =
+        gc_stats.perform_gc_reclaimable_bytes.load(std::memory_order_relaxed);
+    const uint64_t flush_batches =
+        gc_stats.flush_batch_count.load(std::memory_order_relaxed);
+    const uint64_t flush_nodes =
+        gc_stats.flush_nodes_total.load(std::memory_order_relaxed);
+    const uint64_t flush_bytes =
+        gc_stats.flush_bytes_total.load(std::memory_order_relaxed);
+    const uint64_t flush_ns =
+        gc_stats.flush_ns_total.load(std::memory_order_relaxed);
+    const uint64_t flush_1024_batches =
+        gc_stats.flush_1024_batch_count.load(std::memory_order_relaxed);
+    const uint64_t flush_1024_ns =
+        gc_stats.flush_1024_ns_total.load(std::memory_order_relaxed);
+    const uint64_t flush_1024_bytes =
+        gc_stats.flush_1024_bytes_total.load(std::memory_order_relaxed);
+
+    os << "BwTree GC stats: threshold_nodes=" << GC_NODE_COUNT_THREADHOLD
+       << " auto_triggers="
+       << gc_stats.auto_trigger_count.load(std::memory_order_relaxed)
+       << " perform_gc_calls=" << perform_count
+       << " avg_reclaimable_nodes_per_gc="
+       << (perform_count == 0 ? 0 : reclaimable_nodes / perform_count)
+       << " max_reclaimable_nodes_per_gc="
+       << gc_stats.perform_gc_max_reclaimable_nodes.load(
+              std::memory_order_relaxed)
+       << " avg_reclaimable_bytes_per_gc="
+       << (perform_count == 0 ? 0 : reclaimable_bytes / perform_count)
+       << " max_reclaimable_bytes_per_gc="
+       << gc_stats.perform_gc_max_reclaimable_bytes.load(
+              std::memory_order_relaxed)
+       << " delayed_nodes_current="
+       << gc_stats.delayed_nodes_current.load(std::memory_order_relaxed)
+       << " delayed_nodes_max="
+       << gc_stats.delayed_nodes_max.load(std::memory_order_relaxed)
+       << " delayed_nodes_total="
+       << gc_stats.delayed_nodes_total.load(std::memory_order_relaxed)
+       << " delayed_bytes_current_est="
+       << gc_stats.delayed_bytes_current.load(std::memory_order_relaxed)
+       << " delayed_bytes_max_est="
+       << gc_stats.delayed_bytes_max.load(std::memory_order_relaxed)
+       << " delayed_bytes_total_est="
+       << gc_stats.delayed_bytes_total.load(std::memory_order_relaxed)
+       << " flush_batches=" << flush_batches
+       << " flush_nodes_total=" << flush_nodes
+       << " flush_bytes_total_est=" << flush_bytes
+       << " flush_avg_ns="
+       << (flush_batches == 0 ? 0 : flush_ns / flush_batches)
+       << " flush_max_ns="
+       << gc_stats.flush_ns_max.load(std::memory_order_relaxed)
+       << " flush_avg_ns_per_node="
+       << (flush_nodes == 0 ? 0 : flush_ns / flush_nodes)
+       << " flush_max_nodes="
+       << gc_stats.flush_nodes_max.load(std::memory_order_relaxed)
+       << " flush_max_bytes_est="
+       << gc_stats.flush_bytes_max.load(std::memory_order_relaxed)
+       << " flush_1024_batches=" << flush_1024_batches
+       << " flush_1024_avg_ns="
+       << (flush_1024_batches == 0 ? 0
+                                   : flush_1024_ns / flush_1024_batches)
+       << " flush_1024_max_ns="
+       << gc_stats.flush_1024_ns_max.load(std::memory_order_relaxed)
+       << " flush_1024_avg_ns_per_node="
+       << (flush_1024_batches == 0 ? 0
+                                   : flush_1024_ns /
+                                         (flush_1024_batches *
+                                          GC_NODE_COUNT_THREADHOLD))
+       << " flush_1024_avg_bytes_est="
+       << (flush_1024_batches == 0 ? 0
+                                   : flush_1024_bytes / flush_1024_batches)
+       << " flush_1024_max_bytes_est="
+       << gc_stats.flush_1024_bytes_max.load(std::memory_order_relaxed)
+       << std::endl;
+  }
+
+#ifndef ALL_PUBLIC
+ private:
+#else
+ public:
+#endif
+
+  void FlushNodeForGC(const BaseNode *node_p) const {
+    if (node_p == nullptr) {
+      return;
+    }
+
+    node_p->FlushNode();
+  }
+
+  class GCFlushWorker {
+   public:
+    GCFlushWorker(BwTree *p_tree_p, bool p_enabled)
+        : tree_p{p_tree_p},
+          enabled{p_enabled},
+          stop{false},
+          request_ready{false},
+          request_done{false} {
+      if (enabled == true) {
+        worker_thread = std::thread{[this]() { this->ThreadFunc(); }};
+      }
+    }
+
+    ~GCFlushWorker() {
+      if (enabled == false) {
+        return;
+      }
+
+      {
+        std::unique_lock<std::mutex> lock(mutex);
+        stop = true;
+      }
+
+      cv.notify_one();
+      worker_thread.join();
+    }
+
+    bool IsEnabled() const { return enabled; }
+
+    void SubmitAndWait(std::vector<const BaseNode *> nodes,
+                       uint64_t estimated_bytes) {
+      if (enabled == false || nodes.empty() == true) {
+        return;
+      }
+
+      std::unique_lock<std::mutex> lock(mutex);
+      cv.wait(lock, [this]() { return request_ready == false; });
+
+      const uint64_t node_count = nodes.size();
+      pending_nodes = std::move(nodes);
+      request_done = false;
+      request_ready = true;
+      const auto start = std::chrono::steady_clock::now();
+      cv.notify_one();
+
+      cv.wait(lock, [this]() { return request_done == true; });
+      const auto end = std::chrono::steady_clock::now();
+      const auto elapsed_ns =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+              .count();
+      tree_p->RecordGCFlushStats(node_count, estimated_bytes, elapsed_ns);
+    }
+
+   private:
+    BwTree *tree_p;
+    bool enabled;
+    bool stop;
+    bool request_ready;
+    bool request_done;
+    std::vector<const BaseNode *> pending_nodes;
+    std::thread worker_thread;
+    std::mutex mutex;
+    std::condition_variable cv;
+
+    void ThreadFunc() {
+      while (true) {
+        std::vector<const BaseNode *> nodes;
+        {
+          std::unique_lock<std::mutex> lock(mutex);
+          cv.wait(lock,
+                  [this]() { return stop == true || request_ready == true; });
+          if (stop == true && request_ready == false) {
+            break;
+          }
+
+          nodes.swap(pending_nodes);
+        }
+
+        for (const BaseNode *node_p : nodes) {
+          tree_p->FlushNodeForGC(node_p);
+        }
+
+        {
+          std::unique_lock<std::mutex> lock(mutex);
+          request_ready = false;
+          request_done = true;
+        }
+        cv.notify_all();
+      }
+    }
+  };
+
   /*
    * Data Member Definition
    */
@@ -8570,6 +9015,15 @@ class BwTree : public BwTreeBase {
   mapping_table_t mapping_table;
 #endif
 
+#ifdef OPT_ROOT_READ
+  // The mapping table remains authoritative. These replicas accelerate the
+  // frequently-read root pointer and are updated with the same cooperative
+  // protocol used by CLevelHash's replicated meta pointer.
+  nt_pointer<BaseNode> global_root_node_p{nullptr};
+  std::vector<nt_pointer<BaseNode>> root_node_replicas;
+  HelpUpdate<BaseNode> *root_help_update{nullptr};
+#endif
+
   // This list holds free NodeID which was removed by remove delta
   // We recycle NodeID in epoch manager
   AtomicStack<NodeID, MAPPING_TABLE_SIZE> free_node_id_list;
@@ -8585,7 +9039,9 @@ class BwTree : public BwTreeBase {
 
   // InteractiveDebugger idb;
 
+  GCStats gc_stats;
   EpochManager epoch_manager;
+  GCFlushWorker gc_flush_worker;
 
   /* Timers for log */
 #ifdef BWTREE_TIMING_ROOT_LOAD
@@ -8629,6 +9085,42 @@ class BwTree : public BwTreeBase {
 
     // Garbage collection interval (milliseconds)
     constexpr static int GC_INTERVAL = 50;
+
+#ifdef USE_CXL
+    bool ForwardRemoteEpochGCIfNeeded(const BaseNode *node_p) {
+      if (SimThreadInfo::worker_machine_count <= 1) {
+        return false;
+      }
+
+      int owner = get_ptr_machine_index(const_cast<BaseNode *>(node_p));
+      if (owner < 0 ||
+          owner == static_cast<int>(SimThreadInfo::worker_machine_id)) {
+        return false;
+      }
+
+      MsgCollector *collector = g_collector[BWTREE_GC][owner];
+      if (collector == nullptr) {
+        fprintf(stderr,
+                "BwTree remote GC collector is not initialized for owner %d\n",
+                owner);
+        abort();
+      }
+
+      struct RemoteGCRequest {
+        BwTree *tree_p;
+        const BaseNode *node_p;
+      } request{tree_p, node_p};
+
+      msg_node_t *msg = reinterpret_cast<msg_node_t *>(
+          malloc(sizeof(msg_node_t) + sizeof(request)));
+      msg->type = BWTREE_GC;
+      msg->length = sizeof(request);
+      memcpy(msg->content, &request, sizeof(request));
+      collector->sendMsg(msg);
+      free(msg);
+      return true;
+    }
+#endif
 
     /*
      * struct GarbageNode - A linked list of garbages
@@ -9062,6 +9554,11 @@ class BwTree : public BwTreeBase {
      * recycling NodeID
      */
     void FreeEpochDeltaChain(const BaseNode *node_p) {
+#ifdef USE_CXL
+      if (ForwardRemoteEpochGCIfNeeded(node_p)) {
+        return;
+      }
+#endif
       const BaseNode *next_node_p = node_p;
 
       while (1) {
@@ -9116,7 +9613,12 @@ class BwTree : public BwTreeBase {
             // This recycles node ID
             tree_p->InvalidateNodeID(((LeafRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            ((LeafRemoveNode *)node_p)->~LeafRemoveNode();
+            cacheable.free(const_cast<BaseNode *>(node_p));
+#else
             delete ((LeafRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9185,7 +9687,12 @@ class BwTree : public BwTreeBase {
             // see the remove node exit before cleaning the NodeID
             tree_p->InvalidateNodeID(((InnerRemoveNode *)node_p)->removed_id);
 
+#ifdef USE_CXL
+            ((InnerRemoveNode *)node_p)->~InnerRemoveNode();
+            cacheable.free(const_cast<BaseNode *>(node_p));
+#else
             delete ((InnerRemoveNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -9209,7 +9716,12 @@ class BwTree : public BwTreeBase {
             // wrong type after the node has been put into the
             // list (if we delete it directly then this will be
             // a problem)
+#ifdef USE_CXL
+            ((InnerAbortNode *)node_p)->~InnerAbortNode();
+            cacheable.free(const_cast<BaseNode *>(node_p));
+#else
             delete ((InnerAbortNode *)node_p);
+#endif
 
 #ifdef BWTREE_DEBUG
             freed_count++;
@@ -10234,14 +10746,20 @@ class BwTree : public BwTreeBase {
    * do not have to worry about thread identity issues
    */
   void AddGarbageNode(const BaseNode *node_p, const NodeID node_id = 0) {
+    const size_t estimated_bytes = EstimateGCNodeBytes(node_p);
 #ifdef USE_CXL
     GarbageNode *garbage_node_p = static_cast<GarbageNode*>(cacheable.malloc(sizeof(GarbageNode)));
-    new (garbage_node_p) GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id};
+    assert(garbage_node_p != nullptr);
+    new (garbage_node_p)
+        GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id,
+                    estimated_bytes};
 #else
     GarbageNode *garbage_node_p =
-        new GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id};
+        new GarbageNode{GetGlobalEpoch(), (void *)(node_p), node_id,
+                        estimated_bytes};
 #endif
     assert(garbage_node_p != nullptr);
+    RecordDelayedGCBytes(estimated_bytes);
 
     // Link this new node to the end of the linked list
     // and then update last_p
@@ -10259,6 +10777,7 @@ class BwTree : public BwTreeBase {
       // Use current thread's gc id to perform GC
 #ifndef NT_SIM
 // FIXME(FN): disable performing GC to avoid bugs
+      gc_stats.auto_trigger_count.fetch_add(1, std::memory_order_relaxed);
       PerformGC(gc_id);
 #endif
     }
@@ -10290,34 +10809,70 @@ class BwTree : public BwTreeBase {
     GarbageNode *header_p = &GetGCMetaData(thread_id)->header;
     GarbageNode *first_p = header_p->next_p;
 
-    // Then traverse the linked list
-    // Only reclaim memory when the deleted epoch < min epoch
-    while (first_p != nullptr && first_p->delete_epoch < min_epoch) {
-      // First unlink the current node from the linked list
-      // This could set it to nullptr
-      header_p->next_p = first_p->next_p;
+    uint64_t reclaimable_nodes = 0;
+    uint64_t reclaimable_bytes = 0;
+    for (auto *node = first_p; node != nullptr && node->delete_epoch < min_epoch;
+         node = node->next_p) {
+      reclaimable_nodes++;
+      reclaimable_bytes += node->estimated_bytes;
+    }
+    RecordGCTriggerStats(reclaimable_nodes, reclaimable_bytes);
+
+    auto reclaim_one = [this, thread_id, header_p](GarbageNode *garbage_p) {
+      // First unlink the current node from the linked list.
+      header_p->next_p = garbage_p->next_p;
 
       // Remove cached data of the node
 #ifdef OPT_IN_USE_FLAG
       // should first make sure the node is not in the cache
       for (size_t i = 0; i < DEFAULT_MACHINE_COUNT; i++) {
-        cached_mapping_table[i][first_p->node_id].store(nullptr);
+        cached_mapping_table[i][garbage_p->node_id].store(nullptr);
       }
 #endif
 
       // Then free memory
-      epoch_manager.FreeEpochDeltaChain((const BaseNode *)first_p->node_p);
+      epoch_manager.FreeEpochDeltaChain((const BaseNode *)garbage_p->node_p);
+      RecordReleasedGCBytes(garbage_p->estimated_bytes);
 
 #ifdef USE_CXL
-      first_p->~GarbageNode();
-      cacheable.free(first_p);
+      garbage_p->~GarbageNode();
+      cacheable.free(garbage_p);
 #else
-      delete first_p;
+      delete garbage_p;
 #endif
       assert(GetGCMetaData(thread_id)->node_count != 0UL);
       GetGCMetaData(thread_id)->node_count--;
+    };
 
-      first_p = header_p->next_p;
+    if (gc_flush_worker.IsEnabled() == true) {
+      while (first_p != nullptr && first_p->delete_epoch < min_epoch) {
+        std::vector<const BaseNode *> nodes_to_flush;
+        nodes_to_flush.reserve(GC_NODE_COUNT_THREADHOLD);
+        uint64_t batch_bytes = 0;
+
+        GarbageNode *node = first_p;
+        while (node != nullptr && node->delete_epoch < min_epoch &&
+               nodes_to_flush.size() < GC_NODE_COUNT_THREADHOLD) {
+          nodes_to_flush.push_back((const BaseNode *)node->node_p);
+          batch_bytes += node->estimated_bytes;
+          node = node->next_p;
+        }
+
+        const size_t batch_count = nodes_to_flush.size();
+        gc_flush_worker.SubmitAndWait(std::move(nodes_to_flush), batch_bytes);
+
+        for (size_t i = 0; i < batch_count; i++) {
+          reclaim_one(first_p);
+          first_p = header_p->next_p;
+        }
+      }
+    } else {
+      // Then traverse the linked list
+      // Only reclaim memory when the deleted epoch < min epoch
+      while (first_p != nullptr && first_p->delete_epoch < min_epoch) {
+        reclaim_one(first_p);
+        first_p = header_p->next_p;
+      }
     }
 
     // If we have freed all nodes in the linked list we should
