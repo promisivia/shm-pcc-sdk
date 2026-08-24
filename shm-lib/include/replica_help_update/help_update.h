@@ -92,12 +92,7 @@ public:
              std::vector<nt_pointer<T>> &replica_ptrs,
              size_t replica_num)
       : global_ptr_(&global_ptr), replica_ptrs_(&replica_ptrs),
-        replica_num_(replica_num) {
-          printf("HelpUpdate constructor\n");
-          printf("global_ptr: %p\n", global_ptr_);
-          printf("replica_ptrs: %p\n", replica_ptrs_);
-          printf("replica_num: %lu\n", replica_num_);
-        }
+        replica_num_(replica_num) {}
 
   // Update all replicas for one round
   // @param expected_val: Expected value
@@ -129,9 +124,8 @@ public:
       }
     }
 
-    // Try to set global pointer with lock bit
+    // Clear the global pointer's lock bit after all replicas are updated.
     if (global_ptr_->compare_exchange_strong(expected.with_lock(), expected)) {
-      // Successfully set lock bit, now clear it
       return true;
     }
     return true;

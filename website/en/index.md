@@ -2,15 +2,15 @@
 layout: default
 title: Home
 nav_order: 1
-description: "SHM-PCC-SDK - A comprehensive software development kit for CXL/UB shared memory programming"
+description: "CXL-SDK - A comprehensive software development kit for CXL/UB shared memory programming"
 lang: en
 permalink: /en/
 nav_exclude: true
 ---
 
-# SHM-PCC-SDK Documentation
+# CXL-SDK Documentation
 
-Welcome to the SHM-PCC-SDK documentation center! This is a comprehensive software development kit designed for CXL (Compute Express Link) and Unified Buffer (UB) memory systems.
+Welcome to the CXL-SDK documentation center! This is a comprehensive software development kit designed for CXL (Compute Express Link) and Unified Buffer (UB) memory systems.
 
 {% include language-switcher.html %}
 

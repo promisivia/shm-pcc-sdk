@@ -31,6 +31,9 @@ public:
     fs::path program_path(program_path_char);
     fs::path program_dir = program_path.parent_path().parent_path();
     ss << "cd " << program_dir << " && ";
+    ss << "ulimit -c unlimited && ";
+    ss << "LD_LIBRARY_PATH=" << program_dir.parent_path().parent_path() << "/shared_libs ";
+    printf("master shared var=%p\n", g_var_struct);
     ss << "./ycsbc" << " -machineno " << machine_id << " -machinenum "
        << SimThreadInfo::worker_machine_count << " -client_threads "
        << props.GetProperty("client_thread_count") << " -server_threads "

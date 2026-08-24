@@ -191,7 +191,7 @@ void shm_follower_detail::SSHConnection::read_ssh_channel_output() {
   while (ssh_channel_is_open(channel) && !ssh_channel_is_eof(channel)) {
     nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
     if (nbytes > 0) {
-      std::cout << "STDOUT: ";
+      // std::cout << "STDOUT: ";
       std::cout.write(buffer, nbytes);
     } else if (nbytes == SSH_ERROR) {
       std::cerr << "Error reading stdout: "
@@ -201,7 +201,7 @@ void shm_follower_detail::SSHConnection::read_ssh_channel_output() {
 
     nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 1);
     if (nbytes > 0) {
-      std::cerr << "STDERR: ";
+      // std::cerr << "STDERR: ";
       std::cerr.write(buffer, nbytes);
     } else if (nbytes == SSH_ERROR) {
       std::cerr << "Error reading stderr: "

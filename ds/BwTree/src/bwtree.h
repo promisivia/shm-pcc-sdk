@@ -205,7 +205,12 @@ extern CallCounter* traverse_counter;
 #define MAX_THREAD_COUNT ((int)0x7FFFFFFF)
 
 // The maximum number of nodes we could map in this index
-#define MAPPING_TABLE_SIZE ((size_t)(1 << 24))
+#ifndef BWTREE_MAPPING_TABLE_BITS
+#define BWTREE_MAPPING_TABLE_BITS 24
+#endif
+static_assert(BWTREE_MAPPING_TABLE_BITS >= 10 && BWTREE_MAPPING_TABLE_BITS <= 30,
+              "BWTREE_MAPPING_TABLE_BITS must be between 10 and 30");
+#define MAPPING_TABLE_SIZE ((size_t)(1ULL << BWTREE_MAPPING_TABLE_BITS))
 
 // If the length of delta chain exceeds ( >= ) this then we consolidate the node
 #define INNER_DELTA_CHAIN_LENGTH_THRESHOLD ((int)8)
@@ -715,6 +720,9 @@ protected:
    */
   inline GCMetaData *GetGCMetaData(int thread_id) {
     // The thread ID must be within the range
+    if (!(thread_id >= 0 && thread_id < static_cast<int>(thread_num))) {
+      fprintf(stderr, "thread id %d thread num %ld\n", thread_id, thread_num);
+    }
     assert(thread_id >= 0 && thread_id < static_cast<int>(thread_num));
 
     return &(gc_metadata_p + thread_id)->data;
@@ -3027,7 +3035,7 @@ class BwTree : public BwTreeBase {
       // so GC should always succeed
 #ifndef NT_SIM
 // FIXME(FN): disable performing GC to avoid bugs
-      PerformGC(i);
+      // PerformGC(i);
 #endif
 
       // This will collect all nodes since we have adjusted the currenr thread

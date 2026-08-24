@@ -1,3 +1,7 @@
+# 函数 API 索引
+
+此页面由 `website/tools/gen_func_api.py` 从 `shm-lib/include/` 自动生成。
+
 <!-- AUTO-GENERATED BELOW. DO NOT EDIT BY HAND. -->
 
 ## `shm-lib/include/clstale/stale.h`

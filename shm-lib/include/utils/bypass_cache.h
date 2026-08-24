@@ -106,7 +106,7 @@ static inline void clwb(const void* data, size_t len, bool fence = true) {
 #endif
 
 // Non-temporal memory operations
-#if 1
+#ifdef __x86_64__
 // TODO: every memory ordering need to be further examined if no cache coherence
 // Can be substituted with memcpy or direct load/store if cache coherent
 

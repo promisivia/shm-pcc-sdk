@@ -8,6 +8,10 @@ project(YCSBC)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+set(BWTREE_MAPPING_TABLE_BITS 24 CACHE STRING
+    "BwTree mapping-table size as a power of two (24 for paper-scale runs)")
+add_compile_definitions(BWTREE_MAPPING_TABLE_BITS=${BWTREE_MAPPING_TABLE_BITS})
+
 find_package(Libssh QUIET)
 find_path(LIBSSH_INCLUDE_DIR libssh/libssh.h)
 find_library(LIBSSH_LIBRARY NAMES ssh libssh libssh.so.4)

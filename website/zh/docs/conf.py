@@ -1,12 +1,12 @@
-# Sphinx configuration for SHM-PCC-SDK documentation (NCCL-style)
+# Sphinx configuration for CXL-SDK documentation (NCCL-style)
 
 from __future__ import annotations
 
 import os
 from datetime import date
 
-project = "SHM-PCC-SDK"
-author = "SHM-PCC-SDK Team"
+project = "CXL-SDK"
+author = "CXL-SDK Team"
 copyright = f"{date.today().year}, {author}"
 
 extensions = [
@@ -37,7 +37,7 @@ myst_enable_extensions = [
     "tasklist",
     "linkify",
 ]
+myst_heading_anchors = 4
 
 # Keep links readable, similar to docs.nvidia.com pages
 pygments_style = "default"
-

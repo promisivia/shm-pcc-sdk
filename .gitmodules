@@ -1,3 +1,0 @@
-[submodule "atomic"]
-	path = atomic
-	url = git@ipads.se.sjtu.edu.cn:nvsys/logcxl/atomic.git
