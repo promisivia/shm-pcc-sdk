@@ -71,7 +71,13 @@ BwTreeDB::BwTreeDB(int thread_num)
 }
 
 BwTreeDB::~BwTreeDB() {
+#ifdef USE_MSG_QUEUE
+  // Only the message-queue variant registers a DB-owned thread in the
+  // constructor.  In direct-call variants db_thread_id is never initialized;
+  // worker threads register and unregister themselves through ThreadInit() /
+  // ThreadClose().
   this->ThreadClose(this->db_thread_id);
+#endif
   tree->UpdateThreadLocal(1);
   DestroyTree(tree, true);
 }

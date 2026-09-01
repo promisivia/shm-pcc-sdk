@@ -2995,11 +2995,6 @@ class BwTree : public BwTreeBase {
     delete traverse_counter;
     #endif
 
-#ifdef OPT_ROOT_READ
-    delete root_help_update;
-    root_help_update = nullptr;
-#endif
-
     // Clear all garbage nodes awaiting cleaning
     // First of all it should set all last active epoch counter to -1
     ClearThreadLocalGarbage();
@@ -3012,6 +3007,13 @@ class BwTree : public BwTreeBase {
 #endif
 
     bwt_printf("Freed %lu tree nodes\n", node_count);
+
+#ifdef OPT_ROOT_READ
+    // FreeNodeByNodeID() resolves the root through GetRootPtr(), so the
+    // replicated-pointer helper must outlive the node teardown.
+    delete root_help_update;
+    root_help_update = nullptr;
+#endif
 
     return;
   }
