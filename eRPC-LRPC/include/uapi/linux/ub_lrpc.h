@@ -15,6 +15,7 @@
 #define UB_LRPC_CODE_SIZE     0x00100000ULL
 #define UB_LRPC_ASTACK_OFFSET 0x00101000ULL
 #define UB_LRPC_ASTACK_SIZE   0x00100000ULL
+#define UB_LRPC_ASTACK_SLOT_SIZE (UB_LRPC_ASTACK_SIZE / UB_LRPC_MAX_PROCS)
 #define UB_LRPC_DATA_OFFSET   0x00201000ULL
 
 enum ub_lrpc_role {
@@ -62,6 +63,7 @@ struct ub_lrpc_bind {
 	__u64 expected_epoch;
 	__u64 entry_offset;
 	__u64 astack_size;
+	__u64 astack_offset;
 };
 
 struct ub_lrpc_info {

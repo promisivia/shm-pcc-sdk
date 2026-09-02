@@ -8,3 +8,8 @@
 
 Both trees are intentionally ignored by the parent repository.  Local LRPC
 code lives outside them so a clean fetch can be rebuilt without hidden edits.
+
+DeathStarBench is fetched with a blobless sparse checkout of the Hotel
+Reservation Geo protobuf sources. The fetch script adds a nested minimal
+`go.mod`, so building the Geo adapter does not resolve unrelated Consul,
+MongoDB, or Memcached dependencies.

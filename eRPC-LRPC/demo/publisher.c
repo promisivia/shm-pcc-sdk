@@ -14,13 +14,15 @@ int main(int argc, char **argv)
 	const char *dev = argc > 1 ? argv[1] : "/dev/ub_lrpc0";
 	int fd = open(dev, O_RDWR | O_CLOEXEC);
 	uint64_t *service_data;
+	const uint32_t procedures[] = {1, 2, 3, 4};
 
 	if (fd < 0) {
 		fprintf(stderr, "publisher: open %s: %s\n", dev, strerror(errno));
 		return 1;
 	}
-	if (lrpc_publish(fd, lrpc_add_service_image,
-			 lrpc_add_service_image_size, 1, 1)) {
+	if (lrpc_publish_services(fd, lrpc_add_service_image,
+				  lrpc_add_service_image_size, procedures,
+				  sizeof(procedures) / sizeof(procedures[0]), 1)) {
 		fprintf(stderr, "publisher: publish: %s\n", strerror(errno));
 		return 1;
 	}

@@ -25,7 +25,19 @@ else
 	/bin/busybox ip link set eth0 up
 	/bin/busybox ip addr add 10.0.0.1/24 dev eth0
 	LRPC_SHADOW_CPU=1 /lrpc-shadow &
+	LRPC_SHADOW_CPU=1 /lrpc-nested-shadow leaf &
 	/bin/busybox sleep 1
+	LRPC_SHADOW_CPU=1 /lrpc-nested-shadow middle &
+	LRPC_SHADOW_CPU=1 /deathstar-grpc-lrpc shadow &
+	/bin/busybox sleep 1
+	if ! /deathstar-grpc-lrpc; then
+		echo "ERPC_LRPC_FAIL: DeathStarBench Geo gRPC over LRPC"
+		/bin/busybox poweroff -f
+	fi
+	if ! /lrpc-nested-client; then
+		echo "ERPC_LRPC_FAIL: nested shadow chain"
+		/bin/busybox poweroff -f
+	fi
 	if ! /erpc-lrpc-client; then
 		echo "ERPC_LRPC_FAIL: compatibility smoke test"
 		/bin/busybox poweroff -f

@@ -5,6 +5,7 @@
 /vm/bzImage
 /third_party/linux/
 /third_party/eRPC/
+/third_party/DeathStarBench/
 /kernel/*.o
 /kernel/*.ko
 /kernel/*.mod

@@ -5,6 +5,13 @@ linux="$root/third_party/linux"
 rootfs="$root/vm/rootfs"
 jobs=${JOBS:-32}
 
+if [ ! -f "$root/third_party/DeathStarBench/hotelReservation/services/geo/proto/geo.pb.go" ]; then
+	echo "DeathStarBench Geo protobuf sources are missing; run scripts/fetch-deps.sh" >&2
+	exit 1
+fi
+cp "$root/demo/deathstar-grpc/geo-proto.go.mod" \
+	"$root/third_party/DeathStarBench/hotelReservation/services/geo/proto/go.mod"
+
 if [ ! -f "$linux/.config" ]; then
 	"$root/scripts/configure-linux.sh"
 fi
@@ -31,10 +38,20 @@ cc -static -O2 -Wall -Wextra -Werror \
 	-I"$root/include" -I"$root/include/uapi" \
 	"$root/demo/shadow.c" "$root/build/vm/lrpc.o" \
 	"$root/build/vm/switch_stack.o" -o "$rootfs/lrpc-shadow"
+cc -static -O2 -Wall -Wextra -Werror \
+	-I"$root/include" -I"$root/include/uapi" \
+	"$root/demo/nested_shadow.c" "$root/build/vm/lrpc.o" \
+	"$root/build/vm/switch_stack.o" -o "$rootfs/lrpc-nested-shadow"
+cc -static -O2 -Wall -Wextra -Werror \
+	-I"$root/include" -I"$root/include/uapi" \
+	"$root/demo/nested_client.c" "$root/build/vm/lrpc.o" \
+	"$root/build/vm/switch_stack.o" -o "$rootfs/lrpc-nested-client"
 c++ -static -O2 -Wall -Wextra -Werror -std=c++17 \
 	-I"$root/include" -I"$root/include/uapi" -I"$root/demo" \
 	"$root/demo/erpc_client.cc" "$root/build/vm/lrpc.o" \
 	"$root/build/vm/switch_stack.o" -o "$rootfs/erpc-lrpc-client"
+(cd "$root/demo/deathstar-grpc" && \
+	CGO_ENABLED=1 go build -o "$rootfs/deathstar-grpc-lrpc" .)
 
 cp /usr/bin/busybox "$rootfs/bin/busybox"
 cp "$root/kernel/ub_lrpc.ko" "$rootfs/ub_lrpc.ko"
@@ -47,7 +64,8 @@ for lib in libnuma.so.1 libstdc++.so.6 libgcc_s.so.1 libc.so.6 libm.so.6; do
 done
 cp "$root/vm/init" "$rootfs/init"
 chmod 755 "$rootfs/init" "$rootfs/lrpc-publisher" "$rootfs/lrpc-shadow" \
-	"$rootfs/erpc-lrpc-client"
+	"$rootfs/lrpc-nested-shadow" "$rootfs/lrpc-nested-client" \
+	"$rootfs/erpc-lrpc-client" "$rootfs/deathstar-grpc-lrpc"
 for applet in sh mount insmod cat sleep poweroff ip mkdir env; do
 	ln -sf busybox "$rootfs/bin/$applet"
 done

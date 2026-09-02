@@ -149,14 +149,15 @@ index e1df608..f4195cf 100644
 +  rpc->run_event_loop(1000000);
  }
 diff --git a/src/transport_impl/fake/fake_transport.cc b/src/transport_impl/fake/fake_transport.cc
-index 8b95ba0..b943a14 100644
+index 8b95ba0..9120e25 100644
 --- a/src/transport_impl/fake/fake_transport.cc
 +++ b/src/transport_impl/fake/fake_transport.cc
-@@ -1,11 +1,78 @@
+@@ -1,11 +1,80 @@
  #ifdef ERPC_FAKE
  #include "fake_transport.h"
 +
  #include <cstdlib>
++#include <cstddef>
 +#include <cstring>
 +#include <stdexcept>
 +
@@ -204,7 +205,8 @@ index 8b95ba0..b943a14 100644
 +    const pkthdr_t *req = item.msg_buffer_->get_pkthdr_0();
 +    if (!req->is_req() || req->msg_size_ > LRPC_PAYLOAD_MAX) continue;
 +
-+    lrpc_astack call{};
++    lrpc_astack call;
++    std::memset(&call, 0, offsetof(lrpc_astack, payload));
 +    call.abi = LRPC_ASTACK_ABI;
 +    call.procedure_id = req->req_type_;
 +    call.request_size = req->msg_size_;

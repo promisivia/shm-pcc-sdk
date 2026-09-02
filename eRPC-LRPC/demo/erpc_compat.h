@@ -2,6 +2,7 @@
 #define ERPC_LRPC_ERPC_COMPAT_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
 #include <lrpc/lrpc.h>
 
@@ -20,7 +21,8 @@ class Rpc {
 	bool ok() const { return ok_; }
 	void enqueue_request(int, uint8_t req_type, MsgBuffer *req, MsgBuffer *resp,
 			     cont_func_t cont, void *tag) {
-		lrpc_astack call{};
+		lrpc_astack call;
+		memset(&call, 0, offsetof(lrpc_astack, payload));
 		call.abi = LRPC_ASTACK_ABI;
 		call.procedure_id = req_type;
 		call.request_size = req->data_size_;

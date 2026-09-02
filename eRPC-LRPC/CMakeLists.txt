@@ -15,6 +15,12 @@ target_link_libraries(lrpc-publisher PRIVATE lrpc)
 add_executable(lrpc-shadow demo/shadow.c)
 target_link_libraries(lrpc-shadow PRIVATE lrpc)
 
+add_executable(lrpc-nested-shadow demo/nested_shadow.c)
+target_link_libraries(lrpc-nested-shadow PRIVATE lrpc)
+
+add_executable(lrpc-nested-client demo/nested_client.c)
+target_link_libraries(lrpc-nested-client PRIVATE lrpc)
+
 add_executable(erpc-lrpc-client demo/erpc_client.cc)
 target_include_directories(erpc-lrpc-client PRIVATE demo)
 target_link_libraries(erpc-lrpc-client PRIVATE lrpc)

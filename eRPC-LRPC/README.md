@@ -11,10 +11,17 @@ the normal Linux scheduler switches to the shadow's distinct `mm_struct`/CR3.
 queue and no guest-B CPU on the invocation datapath.
 
 The Linux driver enforces role-based mappings, W^X, distinct caller/shadow
-address spaces, same-CPU handoff, and procedure validation. The pinned upstream eRPC tree is built with an LRPC
+address spaces, same-CPU handoff, and procedure validation. Up to 16 published
+services have independent shadow registrations and 64 KiB A-stack slots, so a
+shadow may synchronously invoke another service without overwriting its outer
+call frame. The pinned upstream eRPC tree is built with an LRPC
 datapath: ordinary `Rpc::enqueue_request` invokes `lrpc_invoke()` locally and
 feeds a standard response completion back to eRPC. UDP remains only for eRPC's
 session-management handshake.
+
+The framework-neutral `lrpc_invoke_bytes()` API carries serialized messages up
+to 60 KiB. `adapters/grpc-go` implements the unary
+`grpc.ClientConnInterface`, allowing generated protobuf clients to use LRPC.
 
 ## Security and emulation boundary
 
@@ -43,3 +50,24 @@ ivshmem backing file to both guests, and check separate caller/shadow PIDs,
 denied caller code/data mappings, a result that consumes exported B data, and
 equal CPU IDs before/during/after the service call. See `docs/design.md` for the ABI
 and remaining work toward a production eRPC backend.
+
+The same run also executes 1000 nested `root -> middle -> leaf` requests. This
+validates 4000 directed address-space switches and checks that all three
+processes have distinct PIDs while remaining on one CPU.
+
+It also builds the original DeathStarBench Hotel Reservation Geo protobuf and
+generated gRPC-Go client. Guest A registers a Go shadow for procedure 4 and
+invokes `GeoClient.Nearby()` through `grpc.ClientConnInterface` without a TCP
+data path. A KVM run on 2026-09-01 produced:
+
+```text
+DEATHSTAR_GRPC_LRPC_RESULT method=/geo.Geo/Nearby hotels=[1 2 3]
+DEATHSTAR_GRPC_LRPC_PASS
+LRPC_NESTED_PASS calls=1000 switches=4000 depth=2 avg_ns=20401
+UPSTREAM_ERPC_LRPC_LATENCY samples=1000 warmup=100 min_ns=3933 p50_ns=4393 p99_ns=4893 max_ns=31879 avg_ns=4429.7
+QEMU_E2E_PASS
+```
+
+The Geo handler currently uses an in-memory response so this validates the
+DeathStarBench generated gRPC/protobuf path and shadow execution, not the full
+Hotel Reservation deployment with Consul, MongoDB, and Memcached.

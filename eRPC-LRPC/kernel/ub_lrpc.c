@@ -25,12 +25,7 @@
 #define UB_LRPC_PCI_DEVICE 0x1110
 #define UB_LRPC_BAR 2
 
-struct ub_lrpc_dev {
-	struct pci_dev *pdev;
-	resource_size_t bar_start;
-	resource_size_t bar_size;
-	void __iomem *meta;
-	struct miscdevice misc;
+struct ub_lrpc_channel {
 	struct mutex handoff_lock;
 	struct ub_lrpc_file *shadow_owner;
 	struct task_struct *shadow_task;
@@ -41,12 +36,23 @@ struct ub_lrpc_dev {
 	struct ub_lrpc_handoff handoff;
 };
 
+struct ub_lrpc_dev {
+	struct pci_dev *pdev;
+	resource_size_t bar_start;
+	resource_size_t bar_size;
+	void __iomem *meta;
+	struct miscdevice misc;
+	struct ub_lrpc_channel channel[UB_LRPC_MAX_PROCS];
+};
+
 struct ub_lrpc_file {
 	struct ub_lrpc_dev *dev;
 	enum ub_lrpc_role role;
 	bool bound;
 	u64 epoch;
+	u32 proc_index;
 	struct ub_lrpc_proc_desc proc;
+	struct ub_lrpc_channel *channel;
 };
 
 static inline bool ub_lrpc_range_ok(struct ub_lrpc_dev *d, u64 off, u64 len)
@@ -70,29 +76,31 @@ static int ub_lrpc_open(struct inode *inode, struct file *file)
 static int ub_lrpc_release(struct inode *inode, struct file *file)
 {
 	struct ub_lrpc_file *ctx = file->private_data;
-	struct ub_lrpc_dev *d = ctx->dev;
+	struct ub_lrpc_channel *ch = ctx->channel;
 	struct task_struct *task = NULL;
 	struct task_struct *caller = NULL;
 	struct mm_struct *mm = NULL;
 
-	mutex_lock(&d->handoff_lock);
-	if (d->shadow_owner == ctx) {
-		task = d->shadow_task;
-		mm = d->shadow_mm;
-		d->shadow_owner = NULL;
-		d->shadow_task = NULL;
-		d->shadow_mm = NULL;
-		d->shadow_cpu = -1;
-		caller = d->caller_task;
-		d->caller_task = NULL;
-		if (d->call_pending) {
-			d->handoff.result = -EPIPE;
-			d->call_pending = false;
-			if (d->caller_task)
-				wake_up_process(d->caller_task);
+	if (ch) {
+		mutex_lock(&ch->handoff_lock);
+		if (ch->shadow_owner == ctx) {
+			task = ch->shadow_task;
+			mm = ch->shadow_mm;
+			ch->shadow_owner = NULL;
+			ch->shadow_task = NULL;
+			ch->shadow_mm = NULL;
+			ch->shadow_cpu = -1;
+			caller = ch->caller_task;
+			ch->caller_task = NULL;
+			if (ch->call_pending) {
+				ch->handoff.result = -EPIPE;
+				ch->call_pending = false;
+				if (caller)
+					wake_up_process(caller);
+			}
 		}
+		mutex_unlock(&ch->handoff_lock);
 	}
-	mutex_unlock(&d->handoff_lock);
 	if (mm)
 		mmdrop(mm);
 	if (task)
@@ -141,7 +149,7 @@ static long ub_lrpc_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 			    pub.proc[i].code_size >
 				pub.image_size - pub.proc[i].code_offset ||
 			    !pub.proc[i].astack_size ||
-			    pub.proc[i].astack_size > UB_LRPC_ASTACK_SIZE)
+			    pub.proc[i].astack_size > UB_LRPC_ASTACK_SLOT_SIZE)
 				return -EINVAL;
 		}
 		memset(&meta, 0, sizeof(meta));
@@ -181,10 +189,14 @@ static long ub_lrpc_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 			return -ENOENT;
 		ctx->bound = true;
 		ctx->epoch = meta.code_epoch;
+		ctx->proc_index = i;
 		ctx->proc = meta.proc[i];
+		ctx->channel = &d->channel[i];
 		bind.expected_epoch = meta.code_epoch;
 		bind.entry_offset = meta.proc[i].code_offset;
 		bind.astack_size = meta.proc[i].astack_size;
+		bind.astack_offset = UB_LRPC_ASTACK_OFFSET +
+			(u64)i * UB_LRPC_ASTACK_SLOT_SIZE;
 		return copy_to_user((void __user *)arg, &bind, sizeof(bind)) ?
 			-EFAULT : 0;
 	}
@@ -194,11 +206,16 @@ static long ub_lrpc_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		memcpy_fromio(&meta, d->meta, sizeof(meta));
 		info.code_epoch = meta.code_epoch;
 		info.ready = meta.ready;
-		mutex_lock(&d->handoff_lock);
-		info.shadow_ready = d->shadow_owner != NULL;
-		info.shadow_cpu = d->shadow_cpu;
-		info.shadow_pid = d->shadow_task ? task_pid_nr(d->shadow_task) : 0;
-		mutex_unlock(&d->handoff_lock);
+		info.shadow_cpu = -1;
+		if (ctx->channel) {
+			struct ub_lrpc_channel *ch = ctx->channel;
+			mutex_lock(&ch->handoff_lock);
+			info.shadow_ready = ch->shadow_owner != NULL;
+			info.shadow_cpu = ch->shadow_cpu;
+			info.shadow_pid = ch->shadow_task ?
+				task_pid_nr(ch->shadow_task) : 0;
+			mutex_unlock(&ch->handoff_lock);
+		}
 		return copy_to_user((void __user *)arg, &info, sizeof(info)) ?
 			-EFAULT : 0;
 	}
@@ -206,75 +223,77 @@ static long ub_lrpc_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		if (ctx->role != UB_LRPC_ROLE_SHADOW || !ctx->bound || !current->mm ||
 		    current->nr_cpus_allowed != 1)
 			return -EPERM;
-		mutex_lock(&d->handoff_lock);
-		if (d->shadow_owner) {
-			mutex_unlock(&d->handoff_lock);
+		mutex_lock(&ctx->channel->handoff_lock);
+		if (ctx->channel->shadow_owner) {
+			mutex_unlock(&ctx->channel->handoff_lock);
 			return -EBUSY;
 		}
 		get_task_struct(current);
 		mmgrab(current->mm);
-		d->shadow_owner = ctx;
-		d->shadow_task = current;
-		d->shadow_mm = current->mm;
-		d->shadow_cpu = task_cpu(current);
-		mutex_unlock(&d->handoff_lock);
+		ctx->channel->shadow_owner = ctx;
+		ctx->channel->shadow_task = current;
+		ctx->channel->shadow_mm = current->mm;
+		ctx->channel->shadow_cpu = task_cpu(current);
+		mutex_unlock(&ctx->channel->handoff_lock);
 		return 0;
 	case UB_LRPC_IOC_WAIT_CALL: {
 		struct ub_lrpc_handoff handoff;
+		struct ub_lrpc_channel *ch = ctx->channel;
 		if (ctx->role != UB_LRPC_ROLE_SHADOW)
 			return -EPERM;
 		for (;;) {
-			mutex_lock(&d->handoff_lock);
-			if (d->shadow_owner != ctx) {
-				mutex_unlock(&d->handoff_lock);
+			mutex_lock(&ch->handoff_lock);
+			if (ch->shadow_owner != ctx) {
+				mutex_unlock(&ch->handoff_lock);
 				return -EPIPE;
 			}
-			if (d->call_pending)
+			if (ch->call_pending)
 				break;
 			set_current_state(TASK_INTERRUPTIBLE);
-			mutex_unlock(&d->handoff_lock);
+			mutex_unlock(&ch->handoff_lock);
 			schedule();
 			__set_current_state(TASK_RUNNING);
 			if (signal_pending(current))
 				return -ERESTARTSYS;
 		}
-		d->handoff.shadow_dispatch_ns = ktime_get_ns();
-		handoff = d->handoff;
-		mutex_unlock(&d->handoff_lock);
+		ch->handoff.shadow_dispatch_ns = ktime_get_ns();
+		handoff = ch->handoff;
+		mutex_unlock(&ch->handoff_lock);
 		return copy_to_user((void __user *)arg, &handoff,
 				    sizeof(handoff)) ? -EFAULT : 0;
 	}
 	case UB_LRPC_IOC_CALL: {
 		struct ub_lrpc_handoff handoff;
 		struct task_struct *old_caller = NULL;
+		struct ub_lrpc_channel *ch = ctx->channel;
 		if (ctx->role != UB_LRPC_ROLE_CALLER || !ctx->bound)
 			return -EPERM;
 		if (copy_from_user(&handoff, (void __user *)arg, sizeof(handoff)))
 			return -EFAULT;
-		mutex_lock(&d->handoff_lock);
-		if (!d->shadow_owner) {
-			mutex_unlock(&d->handoff_lock);
+		mutex_lock(&ch->handoff_lock);
+		if (!ch->shadow_owner) {
+			mutex_unlock(&ch->handoff_lock);
 			return -ENOTCONN;
 		}
-		if (current->mm == d->shadow_mm) {
-			mutex_unlock(&d->handoff_lock);
+		if (current->mm == ch->shadow_mm) {
+			mutex_unlock(&ch->handoff_lock);
 			return -EXDEV;
 		}
 		if (current->nr_cpus_allowed != 1) {
-			mutex_unlock(&d->handoff_lock);
+			mutex_unlock(&ch->handoff_lock);
 			return -EXDEV;
 		}
-		if (task_cpu(current) != d->shadow_cpu) {
-			mutex_unlock(&d->handoff_lock);
+		if (task_cpu(current) != ch->shadow_cpu) {
+			mutex_unlock(&ch->handoff_lock);
 			return -EXDEV;
 		}
-		if (d->call_pending) {
-			mutex_unlock(&d->handoff_lock);
+		if (ch->call_pending) {
+			mutex_unlock(&ch->handoff_lock);
 			return -EBUSY;
 		}
-		old_caller = d->caller_task;
+		old_caller = ch->caller_task;
 		get_task_struct(current);
-		d->caller_task = current;
+		ch->caller_task = current;
 		handoff.procedure_id = ctx->proc.procedure_id;
 		handoff.caller_pid = task_pid_nr(current);
 		handoff.caller_cpu = task_cpu(current);
@@ -283,43 +302,44 @@ static long ub_lrpc_ioctl(struct file *file, unsigned int cmd, unsigned long arg
 		handoff.shadow_dispatch_ns = 0;
 		handoff.shadow_return_ns = 0;
 		handoff.caller_resume_ns = 0;
-		d->handoff = handoff;
-		d->call_pending = true;
+		ch->handoff = handoff;
+		ch->call_pending = true;
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		wake_up_process(d->shadow_task);
-		mutex_unlock(&d->handoff_lock);
+		wake_up_process(ch->shadow_task);
+		mutex_unlock(&ch->handoff_lock);
 		if (old_caller)
 			put_task_struct(old_caller);
 		for (;;) {
 			schedule();
 			__set_current_state(TASK_RUNNING);
-			mutex_lock(&d->handoff_lock);
-			if (!d->call_pending)
+			mutex_lock(&ch->handoff_lock);
+			if (!ch->call_pending)
 				break;
 			set_current_state(TASK_UNINTERRUPTIBLE);
-			mutex_unlock(&d->handoff_lock);
+			mutex_unlock(&ch->handoff_lock);
 		}
-		d->handoff.caller_resume_ns = ktime_get_ns();
-		handoff = d->handoff;
-		mutex_unlock(&d->handoff_lock);
+		ch->handoff.caller_resume_ns = ktime_get_ns();
+		handoff = ch->handoff;
+		mutex_unlock(&ch->handoff_lock);
 		return copy_to_user((void __user *)arg, &handoff,
 				    sizeof(handoff)) ? -EFAULT : 0;
 	}
 	case UB_LRPC_IOC_RETURN: {
 		struct ub_lrpc_handoff handoff;
+		struct ub_lrpc_channel *ch = ctx->channel;
 		if (copy_from_user(&handoff, (void __user *)arg, sizeof(handoff)))
 			return -EFAULT;
-		mutex_lock(&d->handoff_lock);
-		if (d->shadow_owner != ctx || !d->call_pending) {
-			mutex_unlock(&d->handoff_lock);
+		mutex_lock(&ch->handoff_lock);
+		if (ch->shadow_owner != ctx || !ch->call_pending) {
+			mutex_unlock(&ch->handoff_lock);
 			return -EPERM;
 		}
-		d->handoff.result = handoff.result;
-		d->handoff.shadow_return_ns = ktime_get_ns();
-		d->call_pending = false;
+		ch->handoff.result = handoff.result;
+		ch->handoff.shadow_return_ns = ktime_get_ns();
+		ch->call_pending = false;
 		set_current_state(TASK_INTERRUPTIBLE);
-		wake_up_process(d->caller_task);
-		mutex_unlock(&d->handoff_lock);
+		wake_up_process(ch->caller_task);
+		mutex_unlock(&ch->handoff_lock);
 		/* Like ChCore sys_ipc_return(): do not continue the shadow. The
 		 * next CALL wakes this kernel continuation, which returns to the
 		 * shadow loop and consumes that already-pending request. */
@@ -363,6 +383,11 @@ static int ub_lrpc_mmap(struct file *file, struct vm_area_struct *vma)
 		if ((ctx->role != UB_LRPC_ROLE_CALLER &&
 		     ctx->role != UB_LRPC_ROLE_SHADOW) || exec)
 			return -EPERM;
+		if (!ctx->bound ||
+		    off != UB_LRPC_ASTACK_OFFSET +
+			   (u64)ctx->proc_index * UB_LRPC_ASTACK_SLOT_SIZE ||
+		    len > UB_LRPC_ASTACK_SLOT_SIZE)
+			return -EPERM;
 	} else if (off >= UB_LRPC_DATA_OFFSET) {
 		if ((ctx->role != UB_LRPC_ROLE_PUBLISHER &&
 		     ctx->role != UB_LRPC_ROLE_SHADOW) || exec)
@@ -390,7 +415,7 @@ static const struct file_operations ub_lrpc_fops = {
 static int ub_lrpc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct ub_lrpc_dev *d;
-	int ret;
+	int ret, i;
 
 	ret = pcim_enable_device(pdev);
 	if (ret)
@@ -408,8 +433,10 @@ static int ub_lrpc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (d->bar_size <= UB_LRPC_DATA_OFFSET)
 		return -ENOSPC;
 	d->meta = pcim_iomap_table(pdev)[UB_LRPC_BAR];
-	mutex_init(&d->handoff_lock);
-	d->shadow_cpu = -1;
+	for (i = 0; i < UB_LRPC_MAX_PROCS; i++) {
+		mutex_init(&d->channel[i].handoff_lock);
+		d->channel[i].shadow_cpu = -1;
+	}
 	d->misc.minor = MISC_DYNAMIC_MINOR;
 	d->misc.name = "ub_lrpc0";
 	d->misc.fops = &ub_lrpc_fops;

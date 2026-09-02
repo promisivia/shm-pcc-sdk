@@ -23,4 +23,13 @@ if [ ! -d "$root/third_party/linux" ]; then
 	tar -xJf "$tmp" -C "$root/third_party"
 	mv "$root/third_party/linux-6.6.155" "$root/third_party/linux"
 fi
+if [ ! -d "$root/third_party/DeathStarBench" ]; then
+	git clone --filter=blob:none --sparse --depth 1 \
+		https://github.com/delimitrou/DeathStarBench.git \
+		"$root/third_party/DeathStarBench"
+	git -C "$root/third_party/DeathStarBench" sparse-checkout set \
+		hotelReservation/services/geo/proto
+fi
+cp "$root/demo/deathstar-grpc/geo-proto.go.mod" \
+	"$root/third_party/DeathStarBench/hotelReservation/services/geo/proto/go.mod"
 "$root/scripts/configure-linux.sh"
