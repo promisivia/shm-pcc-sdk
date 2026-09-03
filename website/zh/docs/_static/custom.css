@@ -19,3 +19,133 @@ h1, h2, h3 {
   float: right;
   margin: .5rem 0 1rem 1rem;
 }
+
+/* Blog landing page */
+.blog-hero {
+  position: relative;
+  overflow: hidden;
+  margin: 0 0 2rem;
+  padding: 2.4rem 2.6rem;
+  border: 1px solid #dce5e1;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f5fbf8 0%, #f7f9fc 62%, #eef4f2 100%);
+}
+
+.blog-hero::after {
+  position: absolute;
+  right: -4rem;
+  bottom: -5rem;
+  width: 13rem;
+  height: 13rem;
+  border: 2rem solid rgba(41, 121, 93, .08);
+  border-radius: 50%;
+  content: "";
+}
+
+.blog-kicker,
+.post-kicker {
+  margin-bottom: .55rem;
+  color: #287a5b;
+  font-size: .76rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.blog-hero h1 {
+  max-width: 680px;
+  margin: 0 0 .7rem;
+  color: #172923;
+  font-size: 2.25rem;
+  line-height: 1.15;
+}
+
+.blog-hero p {
+  max-width: 700px;
+  margin: 0;
+  color: #4d615a;
+  font-size: 1.03rem;
+  line-height: 1.8;
+}
+
+.blog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1.2rem 0 2rem;
+}
+
+.blog-card {
+  display: block;
+  min-height: 154px;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid #e0e6e3;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  box-shadow: 0 6px 18px rgba(26, 48, 40, .04);
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+
+.blog-card:hover {
+  border-color: #76ad98;
+  color: inherit;
+  box-shadow: 0 10px 24px rgba(26, 48, 40, .08);
+  transform: translateY(-2px);
+}
+
+.blog-card .card-number {
+  color: #668179;
+  font-family: monospace;
+  font-size: .72rem;
+}
+
+.blog-card h3 {
+  margin: .7rem 0 .45rem;
+  color: #213c33;
+  font-size: 1.05rem;
+}
+
+.blog-card p {
+  margin: 0;
+  color: #64756f;
+  font-size: .86rem;
+  line-height: 1.6;
+}
+
+.blog-card .card-status {
+  display: inline-block;
+  margin-top: .8rem;
+  color: #287a5b;
+  font-size: .72rem;
+  font-weight: 700;
+}
+
+.post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem;
+  margin: -.25rem 0 1.5rem;
+}
+
+.post-meta span {
+  padding: .22rem .58rem;
+  border-radius: 999px;
+  background: #eef5f2;
+  color: #526861;
+  font-size: .74rem;
+}
+
+@media (max-width: 720px) {
+  .blog-hero {
+    padding: 1.7rem 1.35rem;
+  }
+
+  .blog-hero h1 {
+    font-size: 1.75rem;
+  }
+
+  .blog-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -6,6 +6,7 @@
 :maxdepth: 2
 :caption: Content
 
+blog/index
 content/index
 components/index
 guides/index
@@ -27,6 +28,7 @@ roadmap
 
 ## 快速入口
 
+- {doc}`blog/index`：从设计问题出发，理解每个模块为什么这样实现
 - {doc}`content/index`：SDK 内容总览（这个 SDK 有什么）
 - {doc}`components/index`：组件使用（数据结构 / RPC / apps）
 - {doc}`guides/index`：开发者文档（如何开发/扩展 SDK）
