@@ -1,0 +1,9 @@
+# Sphinx documentation toolchain (NCCL-style: Sphinx + Read the Docs theme)
+sphinx>=7.2,<9
+sphinx-rtd-theme>=2.0,<4
+myst-parser>=2.0,<5
+linkify-it-py>=2.0.0,<3
+sphinx-copybutton>=0.5,<1
+
+# Local dev server (optional but recommended)
+sphinx-autobuild>=2024.0.0

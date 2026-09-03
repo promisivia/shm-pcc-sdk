@@ -36,6 +36,7 @@ memory-bank
 # Test output files
 *.txt
 !CMakeLists.txt
+!website/requirements.txt
 *.log
 output.txt
 throughput.txt
