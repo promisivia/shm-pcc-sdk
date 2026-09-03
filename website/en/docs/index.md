@@ -1,24 +1,44 @@
 # CXL-SDK Documentation
 
-This documentation covers installation, configuration, development, and project
-practices for CXL-SDK.
+CXL-SDK provides reusable memory management, concurrent data structures,
+communication, and evaluation components for shared-memory and CXL/UB systems.
+
+The documentation is organized by reading goal: start with the overview to
+install and use the SDK, read the technical blog for design background, use the
+developer documentation when extending the repository, and consult the API
+Reference for individual interfaces.
 
 ```{toctree}
-:maxdepth: 2
-:caption: Documentation
+:maxdepth: 1
+:caption: Overview
 
-user-guide
-environment-variables
-developer-guide
-contributing
-code-review
-open-source-checklist
-roadmap
-technical_report
+Project overview <overview/index>
+Installation and quick start <user-guide>
+Environment configuration <environment-variables>
+Future roadmap <roadmap>
 ```
 
-## Quick links
+```{toctree}
+:maxdepth: 1
+:caption: Technical Blog
 
-- {doc}`user-guide`: install the SDK and run a first workload.
-- {doc}`developer-guide`: understand the repository and extend the SDK.
-- {doc}`technical_report`: project motivation and technical direction.
+Technical blog <blog/index>
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Developer Documentation
+
+Developer documentation <developers/index>
+Developer guide <developer-guide>
+Contributing <contributing>
+Code review and readiness <code-review>
+Open-source release checklist <open-source-checklist>
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: API Reference
+
+API Reference <api/index>
+```

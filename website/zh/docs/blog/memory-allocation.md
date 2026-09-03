@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">02 / Memory</div>
 
 # 分配器：从字节到可共享对象

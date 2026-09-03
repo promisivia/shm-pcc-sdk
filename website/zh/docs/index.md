@@ -1,35 +1,40 @@
 # CXL-SDK 文档
 
-面向基于 `shm-lib` 开发 YCSB、BwTree 等系统的开发者，提供“怎么接入/怎么查 API”的文档站点（风格对齐 NCCL：Sphinx + RTD）。
+CXL-SDK 为共享内存与 CXL/UB 系统开发提供可复用的内存管理、并发数据结构、通信和评测组件。
+
+本站按阅读目的分为四个部分：先从概览完成安装并了解项目能力；通过技术博客理解 CXL/UB 与系统设计；在开发者文档中学习如何扩展仓库；需要具体接口时查阅 API Reference。
 
 ```{toctree}
-:maxdepth: 2
-:caption: Content
+:maxdepth: 1
+:caption: 概览
 
-blog/index
-content/index
-components/index
-guides/index
-api/index
+项目概览 <overview/index>
+安装与快速开始 <user-guide>
+环境配置 <environment-variables>
+未来 Roadmap <roadmap>
 ```
 
 ```{toctree}
 :maxdepth: 1
-:caption: Project
+:caption: 技术博客
 
-user-guide
-developer-guide
-contributing
-environment-variables
-code-review
-open-source-checklist
-roadmap
+技术博客 <blog/index>
 ```
 
-## 快速入口
+```{toctree}
+:maxdepth: 1
+:caption: 开发者文档
 
-- {doc}`blog/index`：从设计问题出发，理解每个模块为什么这样实现
-- {doc}`content/index`：SDK 内容总览（这个 SDK 有什么）
-- {doc}`components/index`：组件使用（数据结构 / RPC / apps）
-- {doc}`guides/index`：开发者文档（如何开发/扩展 SDK）
-- {doc}`api/index`：API Reference（按头文件/模块索引）
+开发者文档 <guides/index>
+开发指南 <developer-guide>
+参与贡献 <contributing>
+代码审查与开源状态 <code-review>
+开源发布清单 <open-source-checklist>
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: API Reference
+
+API Reference <api/index>
+```

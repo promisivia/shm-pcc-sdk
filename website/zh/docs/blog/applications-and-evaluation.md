@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">06 / Evaluation</div>
 
 # 应用与评测：怎样证明设计有效

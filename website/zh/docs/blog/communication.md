@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">04 / Communication</div>
 
 # 通信：共享内存与 RPC 怎么分工

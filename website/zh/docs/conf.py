@@ -28,7 +28,7 @@ html_theme_options = {
     # RTD defaults already feel close to NCCL; keep minimal overrides
     "collapse_navigation": False,
     "navigation_depth": 4,
-    "titles_only": False,
+    "titles_only": True,
 }
 
 # MyST (Markdown) settings

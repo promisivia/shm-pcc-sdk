@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Components
 
 这里提供“怎么用组件”的文档入口，面向希望直接在共享内存/CXL 平台上落地系统原型的读者：
@@ -13,4 +17,3 @@ data_structures
 rpc_comms
 apps
 ```
-

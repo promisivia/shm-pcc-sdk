@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">03 / Data Structures</div>
 
 # 数据结构：为什么它是 SDK 的中心层

@@ -18,7 +18,7 @@ html_favicon = "../../favicon.png"
 html_theme_options = {
     "collapse_navigation": False,
     "navigation_depth": 4,
-    "titles_only": False,
+    "titles_only": True,
 }
 
 myst_enable_extensions = ["colon_fence", "deflist", "tasklist", "linkify"]

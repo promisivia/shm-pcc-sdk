@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">01 / Runtime</div>
 
 # shm-lib：共享内存编程模型

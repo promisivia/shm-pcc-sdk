@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 <div class="post-kicker">05 / Concurrency</div>
 
 # 并发控制：OCC、STM 与数据结构内建机制

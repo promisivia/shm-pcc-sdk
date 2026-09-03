@@ -179,8 +179,4 @@ If CXL memory is not accessible:
 - Verify permissions: `ls -l /dev/cxl/mem0`
 - Check if memkind supports CXL: `memkind --help`
 
-lang: zh
----
-
 For more information, see [User Guide](user-guide.md) or [Configuration](user-guide.md#configuration).
-
