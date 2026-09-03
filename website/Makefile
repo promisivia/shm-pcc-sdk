@@ -26,6 +26,7 @@ html: zh/docs/api/func_api.md
 	mkdir -p "$(SITE_DIR)"
 	cp landing.html "$(SITE_DIR)/index.html"
 	cp 404.html "$(SITE_DIR)/404.html"
+	cp favicon.png "$(SITE_DIR)/favicon.png"
 
 zh: zh/docs/api/func_api.md
 	$(SPHINXBUILD) -b html "$(ZH_SOURCE)" "$(SITE_DIR)/zh" $(SPHINXOPTS)
