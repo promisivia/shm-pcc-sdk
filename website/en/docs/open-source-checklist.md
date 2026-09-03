@@ -1,7 +1,7 @@
 # Open Source Preparation Checklist
 
 
-This document provides a comprehensive checklist and recommendations for preparing SHM-PCC-SDK for open source release.
+This document provides a comprehensive checklist and recommendations for preparing CXL-SDK for open source release.
 
 ## 📋 Pre-Release Checklist
 
@@ -337,7 +337,7 @@ shm-pcc-sdk/
 ### High Priority (Before First Release)
 
 1. Add LICENSE file
-2. Complete README.md
+2. Complete `README.md`
 3. Add basic documentation
 4. Clean up sensitive data
 5. Add .gitignore
@@ -381,4 +381,3 @@ lang: en
 ---
 
 **Note**: This checklist should be customized based on your specific project needs and requirements.
-

@@ -1,6 +1,6 @@
 # User Guide
 
-This document provides detailed usage instructions for SHM-PCC-SDK, including installation, configuration, running examples, and troubleshooting.
+This document provides detailed usage instructions for CXL-SDK, including installation, configuration, running examples, and troubleshooting.
 
 ## Table of Contents
 
@@ -106,6 +106,5 @@ cd tests/YCSB-C
 ## FAQ
 
 [Add frequently asked questions here]
-
 
 

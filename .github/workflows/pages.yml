@@ -43,6 +43,7 @@ jobs:
           python -m pip install -r requirements.txt
           python tools/gen_func_api.py --repo-root .. --out zh/docs/api/func_api.md
           make html SPHINXOPTS='-n'
+          python tools/check_internal_links.py _build/html --base-path /shm-pcc-sdk/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

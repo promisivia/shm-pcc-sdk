@@ -1,7 +1,7 @@
 # Developer Guide
 
 
-This guide is for developers who want to contribute to SHM-PCC-SDK, understand the codebase structure, and extend the project.
+This guide is for developers who want to contribute to CXL-SDK, understand the codebase structure, and extend the project.
 
 ## Table of Contents
 
@@ -534,5 +534,5 @@ public:
 lang: en
 ---
 
-For more information, see [API Reference](API_REFERENCE.md) or open an [Issue](https://github.com/your-org/shm-pcc-sdk/issues).
-
+For more information, see the [Chinese API Reference](https://promisivia.github.io/shm-pcc-sdk/zh/api/)
+or open an [Issue](https://github.com/promisivia/shm-pcc-sdk/issues).

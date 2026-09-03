@@ -25,6 +25,7 @@ html: zh/docs/api/func_api.md
 	$(MAKE) en
 	mkdir -p "$(SITE_DIR)"
 	cp landing.html "$(SITE_DIR)/index.html"
+	cp 404.html "$(SITE_DIR)/404.html"
 
 zh: zh/docs/api/func_api.md
 	$(SPHINXBUILD) -b html "$(ZH_SOURCE)" "$(SITE_DIR)/zh" $(SPHINXOPTS)

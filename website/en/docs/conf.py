@@ -1,9 +1,9 @@
-"""Sphinx configuration for the English SHM-PCC-SDK documentation."""
+"""Sphinx configuration for the English CXL-SDK documentation."""
 
 from datetime import date
 
-project = "SHM-PCC-SDK"
-author = "SHM-PCC-SDK Team"
+project = "CXL-SDK"
+author = "CXL-SDK Team"
 copyright = f"{date.today().year}, {author}"
 
 extensions = ["myst_parser", "sphinx_copybutton"]

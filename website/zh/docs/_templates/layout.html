@@ -1,6 +1,9 @@
 {% extends "!layout.html" %}
 
 {% block content %}
-<p class="language-switcher"><a href="../../en/">English</a></p>
+{% set shared_pages = ["user-guide", "environment-variables", "developer-guide", "contributing", "code-review", "open-source-checklist", "roadmap", "genindex", "search"] %}
+{% set site_root = "../" * (pagename.count("/") + 1) %}
+{% set counterpart = pagename ~ ".html" if pagename in shared_pages else "" %}
+<p class="language-switcher"><a href="{{ site_root }}en/{{ counterpart }}" lang="en" hreflang="en" aria-label="Switch to English documentation">English</a></p>
 {{ super() }}
 {% endblock %}

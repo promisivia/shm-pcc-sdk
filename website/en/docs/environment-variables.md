@@ -1,7 +1,7 @@
 # Environment Variables
 
 
-This document describes the environment variables used by SHM-PCC-SDK.
+This document describes the environment variables used by CXL-SDK.
 
 ## Sudo Password
 
@@ -179,6 +179,5 @@ If CXL memory is not accessible:
 lang: en
 ---
 
-For more information, see [User Guide](USER_GUIDE.md) or [Configuration](USER_GUIDE.md#configuration).
-
-
+For more information, see the [User Guide](user-guide.md) or its
+[configuration section](user-guide.md#configuration).

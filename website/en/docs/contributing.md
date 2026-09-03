@@ -1,7 +1,7 @@
-# Contributing to SHM-PCC-SDK
+# Contributing to CXL-SDK
 
 
-Thank you for your interest in contributing to SHM-PCC-SDK! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to CXL-SDK! This document provides guidelines and instructions for contributing.
 
 ## Table of Contents
 
@@ -161,7 +161,7 @@ Fixes #456
 
 ### C++ Style
 
-Follow the project's C++ style guidelines (see [Developer Guide](DEVELOPER_GUIDE.md)):
+Follow the project's C++ style guidelines (see the [Developer Guide](developer-guide.md)):
 
 - Use 4 spaces for indentation
 - Maximum line length: 100 characters
@@ -427,9 +427,9 @@ Closes #123
 
 ### Resources
 
-- [Developer Guide](DEVELOPER_GUIDE.md)
-- [User Guide](USER_GUIDE.md)
-- [API Reference](API_REFERENCE.md)
+- [Developer Guide](developer-guide.md)
+- [User Guide](user-guide.md)
+- [Chinese API Reference](https://promisivia.github.io/shm-pcc-sdk/zh/api/)
 - GitHub Discussions
 - GitHub Issues
 
@@ -443,9 +443,8 @@ Closes #123
 ## Recognition
 
 Contributors will be:
-- Listed in CONTRIBUTORS.md
+- Listed in `CONTRIBUTORS.md`
 - Credited in release notes
 - Acknowledged in documentation
 
-Thank you for contributing to SHM-PCC-SDK! 🎉
-
+Thank you for contributing to CXL-SDK! 🎉

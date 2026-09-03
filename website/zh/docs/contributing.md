@@ -449,7 +449,7 @@ Closes #123
 ## Recognition
 
 Contributors will be:
-- Listed in CONTRIBUTORS.md
+- Listed in `CONTRIBUTORS.md`
 - Credited in release notes
 - Acknowledged in documentation
 

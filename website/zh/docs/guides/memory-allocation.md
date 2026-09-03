@@ -55,7 +55,7 @@ YCSB 的 `PrepareShmEnv` 是最直接参考：从 ini 配置读取共享内存�
 ```{literalinclude} ../../../../shm-lib/shm/mm.cc
 :language: cpp
 :start-after: // Use MAP_SHARED for multi-process shared memory
-:end-before: if (mmap_base == MAP_FAILED)
+:end-before: if( mmap_base == MAP_FAILED)
 ```
 
 这也是为什么配置里会有 `mmap_base_addr`：它是“跨进程地址稳定性”的控制旋钮（详见下文第 4 节）。

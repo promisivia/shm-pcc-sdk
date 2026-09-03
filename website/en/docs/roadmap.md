@@ -1,6 +1,6 @@
 # Roadmap
 
-The roadmap tracks the planned evolution of SHM-PCC-SDK. Priorities may change
+The roadmap tracks the planned evolution of CXL-SDK. Priorities may change
 as hardware platforms and evaluation results evolve.
 
 

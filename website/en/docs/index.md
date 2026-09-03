@@ -1,7 +1,7 @@
-# SHM-PCC-SDK Documentation
+# CXL-SDK Documentation
 
 This documentation covers installation, configuration, development, and project
-practices for SHM-PCC-SDK.
+practices for CXL-SDK.
 
 ```{toctree}
 :maxdepth: 2
